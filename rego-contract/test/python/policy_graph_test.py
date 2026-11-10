@@ -1,9 +1,11 @@
 """A policy graph against a live deployment, decided by its test vectors.
 
-    python startup.py && python policy_graph_test.py <graph folder> && python cleanup.py
+    python startup.py
+    python policy_graph_test.py <graph.json> <components folder> <graph_vectors.json>
+    python cleanup.py
 
-The folder holds graph.json, components/<id>/component.rego and graph_vectors.json (the
-format pdo.rego.graph.vectors describes; ../graphs/download/ is one). Every DID the vectors
+The components folder holds <id>/component.rego, and the vectors follow the format
+pdo.rego.graph.vectors describes; ../graphs/download/ has all three. Every DID the vectors
 name as an issuer or signer becomes a signature authority, the registry they describe
 becomes the agent's trusted issuers, and each vector is presented from fresh wallets, one
 per role. The contract must reach the decision the vector expects: an allow must issue the
@@ -29,10 +31,10 @@ ISSUER = "user1"
 OWNER = "user2"
 HOLDER = "user3"
 
-FOLDER = os.path.abspath(sys.argv[1])
-with open(os.path.join(FOLDER, "graph.json")) as fp:
+GRAPH_FILE, COMPONENTS, VECTORS = (os.path.abspath(arg) for arg in sys.argv[1:4])
+with open(GRAPH_FILE) as fp:
     GRAPH = json.load(fp)
-with open(os.path.join(FOLDER, "graph_vectors.json")) as fp:
+with open(VECTORS) as fp:
     SUITE = json.load(fp)
 
 state, _ = setup_pdo_state()
@@ -113,7 +115,7 @@ graph["trusted_issuers"] = {t: [dids[d] for d in listed] for t, listed in GRAPH[
 for node_id, node in graph["nodes"].items():
     node["policy_data"] = SUITE["policy_data"][node_id]
 policy_agent.set_policy_graph(
-    state, agent, OWNER, graph=write_json("policy_graph.json", graph), components=os.path.join(FOLDER, "components")
+    state, agent, OWNER, graph=write_json("policy_graph.json", graph), components=COMPONENTS
 )
 
 signed_cache = {}
