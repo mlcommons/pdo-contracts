@@ -82,6 +82,7 @@ setup(
         "pdo.rego.scripts",
         "pdo.rego.operations",
         "pdo.rego.decentralized",
+        "pdo.rego.graph",
         "pdo.rego.resources",
         "pdo.rego.resources.etc",
         "pdo.rego.resources.context",
@@ -102,6 +103,7 @@ setup(
             "rego_token=pdo.rego.scripts.scripts:rego_token",
             "rego_policy_agent=pdo.rego.scripts.scripts:rego_policy_agent",
             "rego_evaluator=pdo.rego.scripts.scripts:rego_evaluator",
+            "pdo-rego-graph=pdo.rego.graph.cli:main",
             "guardian_service=pdo.contracts.guardian.scripts.guardianCLI:Main",
         ]
     },

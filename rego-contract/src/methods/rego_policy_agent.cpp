@@ -35,6 +35,7 @@
 #include "identity/policy_agent.h" // inherited trusted-issuer / policy-data / verify / issue methods
 #include "rego/rego_policy_agent.h"
 #include "rego/rego_combinators.h" // hardcoded requirement / result combinator policies
+#include "rego/policy_graph.h"     // graph mode: validate, expand, plan and run a policy graph
 #include "identity/common/Credential.h"
 #include "identity/common/did.h"
 #include "identity/crypto/Crypto.h"       // SHA384Hash, used for direct-key EC verification
@@ -50,6 +51,15 @@
 //     "input_schema"  -- { role: <verifiable presentation schema>, ... }
 //     "credential_type"   -- the type of credential issued (declared by one subpolicy)
 //     "issuing_subpolicy" -- the id of the subpolicy that declares it
+//   or set_policy_graph fills it, once, for a policy that is a graph of components:
+//     "policy_kind"   -- "graph" (a contract without it holds a flat policy, or none)
+//     "policy_graph"  -- the graph, each node's policy_data emptied (the values are
+//                        in policy_data, keyed by node)
+//     "components"    -- [ [ component_id, source ], ... ]
+//     "interfaces"    -- { component_id: interface }
+//     "roles"         -- [ role, ... ]                  (read by some alternative)
+//     "alternatives"  -- [ { role: [credential_type, ...] }, ... ], smallest first
+//     "graph_hash"    -- base64 sha256 of the graph and the components, for audits
 //   policy_metadata_store : the SAME store the inherited policy_agent methods
 //     use. We read "policy_data" / "trusted_issuers" for the Rego input, and
 //     write the merged "requirements" there so get_requirements can return them.
@@ -317,7 +327,8 @@ bool ww::rego::rego_policy_agent::set_rego_policy(
                    "invalid request, missing 'rego_modules'");
 
     std::string existing_modules;
-    ASSERT_SUCCESS(rsp, !rego_policy_store.get("rego_modules", existing_modules),
+    ASSERT_SUCCESS(rsp, !rego_policy_store.get("rego_modules", existing_modules) &&
+                            !rego_policy_store.get("policy_kind", existing_modules),
                    "invalid request, the rego policy is already set");
 
     ww::value::Array modules;
@@ -881,6 +892,274 @@ static bool build_output_credential(
     return true;
 }
 
+// =================================================================
+// graph mode helpers: the policy set by set_policy_graph
+// =================================================================
+
+static bool is_graph_policy()
+{
+    std::string policy_kind;
+    return rego_policy_store.get("policy_kind", policy_kind) && policy_kind == "graph";
+}
+
+// -----------------------------------------------------------------
+// Load the stored graph policy: the graph, its components, their interfaces, and the
+// roles some alternative presents from.
+// -----------------------------------------------------------------
+static bool load_graph_policy(
+    ww::value::Object &graph,
+    ww::value::Array &components,
+    ww::value::Object &interfaces,
+    ww::value::Array &roles)
+{
+    std::string serialized;
+    ERROR_IF_NOT(rego_policy_store.get("policy_graph", serialized) && graph.deserialize(serialized.c_str()),
+                 "unexpected error, failed to load the policy graph");
+    ERROR_IF_NOT(rego_policy_store.get("components", serialized) && components.deserialize(serialized.c_str()),
+                 "unexpected error, failed to load the components");
+    ERROR_IF_NOT(rego_policy_store.get("interfaces", serialized) && interfaces.deserialize(serialized.c_str()),
+                 "unexpected error, failed to load the interfaces");
+    ERROR_IF_NOT(rego_policy_store.get("roles", serialized) && roles.deserialize(serialized.c_str()),
+                 "unexpected error, failed to load the roles");
+    return true;
+}
+
+// -----------------------------------------------------------------
+// Plan a graph request and, unless a presented input has nothing to take, run the
+// planned nodes. The presentations may leave out a role only some alternatives read,
+// but may not name a role the graph never reads. The views of the presented
+// credentials are built as for a flat policy (build_rego_input), which numbers them
+// role by role, in order.
+// -----------------------------------------------------------------
+static bool evaluate_graph_request(
+    const Message &msg,
+    ww::value::Object &graph,
+    ww::value::Object &interfaces,
+    ww::value::Object &plan,
+    ww::value::Object &outputs,
+    std::vector<std::string> &vc_json_by_index,
+    std::string &error_msg)
+{
+    ww::value::Object presentations;
+    ww::value::Object request;
+    if (!msg.get_value("presentation", presentations) || !msg.get_value("request", request))
+    {
+        error_msg.assign("invalid request, missing 'presentation' or 'request'");
+        return false;
+    }
+
+    ww::value::Array components;
+    ww::value::Array roles;
+    if (!load_graph_policy(graph, components, interfaces, roles))
+    {
+        error_msg.assign("unexpected error, failed to load the policy graph");
+        return false;
+    }
+
+    const JSON_Object *presented_by_role = json_value_get_object(presentations.get());
+    ww::value::Array presented_roles;
+    size_t known = 0;
+    for (size_t ri = 0; ri < roles.get_count(); ri++)
+    {
+        const char *role = roles.get_string(ri);
+        if (role == nullptr || !json_object_has_value(presented_by_role, role))
+            continue;
+        ww::value::Object vp_object;
+        if (!presentations.get_value(role, vp_object) || !vp_object.validate_schema(VERIFIABLE_PRESENTATION_SCHEMA))
+        {
+            error_msg.assign(std::string("invalid request, the presentation for ") + role + " is ill-formed");
+            return false;
+        }
+        presented_roles.append_string(role);
+        known++;
+    }
+    if (known != json_object_get_count(presented_by_role))
+    {
+        error_msg.assign("invalid request, the presentations name a role the policy does not read");
+        return false;
+    }
+
+    ww::value::Object rego_input;
+    if (!build_rego_input(presentations, presented_roles, request, rego_input, vc_json_by_index))
+    {
+        error_msg.assign("invalid request, failed to build the rego input");
+        return false;
+    }
+
+    ww::value::Object presented;
+    ww::value::Object policy_data;
+    if (!rego_input.get_value("presentations", presented) || !rego_input.get_value("policy_data", policy_data))
+    {
+        error_msg.assign("unexpected error, ill-formed rego input");
+        return false;
+    }
+    std::vector<ww::value::Object> views;
+    for (size_t ri = 0; ri < presented_roles.get_count(); ri++)
+    {
+        ww::value::Array creds;
+        presented.get_value(presented_roles.get_string(ri), creds);
+        for (size_t ci = 0; ci < creds.get_count(); ci++)
+        {
+            ww::value::Object view;
+            creds.get_value(ci, view);
+            views.push_back(view);
+        }
+    }
+
+    if (!ww::rego::policy_graph::plan_graph(graph, interfaces, presented, plan, error_msg))
+        return false;
+
+    ww::value::Array missing;
+    if (!plan.get_value("missing", missing))
+    {
+        error_msg.assign("unexpected error, the planner returned no missing inputs");
+        return false;
+    }
+    if (missing.get_count() > 0)
+        return true;
+
+    return ww::rego::policy_graph::run_graph(
+        graph, components, interfaces, plan, views, policy_data, request, outputs, error_msg);
+}
+
+// -----------------------------------------------------------------
+// Verify every presented credential the plan bound to an active node, whether a
+// component cited it or not: against the registry, as for a flat policy, and, when
+// the graph lists issuers for its type, it must be from one of them; or, for an input
+// its component checks against a key it supplies, against every key the node supplied
+// for it, of which there must be at least one. Returns false at the first failure.
+// -----------------------------------------------------------------
+static bool verify_bound_credentials(
+    const ww::value::Object &graph,
+    const ww::value::Object &interfaces,
+    const ww::value::Object &plan,
+    const ww::value::Object &outputs,
+    const std::vector<std::string> &vc_json_by_index)
+{
+    const JSON_Object *nodes = json_object_get_object(json_value_get_object(graph.get()), "nodes");
+    const JSON_Object *trusted = json_object_get_object(json_value_get_object(graph.get()), "trusted_issuers");
+    const JSON_Array *order = json_object_get_array(json_value_get_object(plan.get()), "order");
+    const JSON_Object *bindings = json_object_get_object(json_value_get_object(plan.get()), "bindings");
+
+    for (size_t o = 0; o < json_array_get_count(order); o++)
+    {
+        const char *node_id = json_array_get_string(order, o);
+        const char *component_id = json_object_get_string(json_object_get_object(nodes, node_id), "component");
+        const JSON_Object *specs = json_object_get_object(
+            json_object_get_object(json_value_get_object(interfaces.get()), component_id), "inputs");
+        const JSON_Array *node_outputs = json_object_get_array(json_value_get_object(outputs.get()), node_id);
+        const JSON_Object *node_bindings = json_object_get_object(bindings, node_id);
+
+        for (size_t b = 0; b < json_object_get_count(node_bindings); b++)
+        {
+            const char *name = json_object_get_name(node_bindings, b);
+            const JSON_Object *spec = json_object_get_object(specs, name);
+            const char *type = json_object_get_string(spec, "type");
+            const bool supplied_key = json_object_get_boolean(spec, "supplied_key") == 1;
+            const JSON_Array *entries = json_object_get_array(node_bindings, name);
+
+            for (size_t e = 0; e < json_array_get_count(entries); e++)
+            {
+                const JSON_Array *indices = json_object_get_array(json_array_get_object(entries, e), "indices");
+                for (size_t k = 0; k < json_array_get_count(indices); k++)
+                {
+                    const double index = json_array_get_number(indices, k);
+                    ww::value::Object task;
+                    task.set_number("index", index);
+                    ww::value::Object vc_object;
+                    ww::identity::VerifiableCredential vc;
+                    if (!load_task_credential(task, vc_json_by_index, vc_object, vc))
+                        return false;
+
+                    if (!supplied_key)
+                    {
+                        if (!ww::identity::policy_agent::verify_credential(vc_object, vc, type))
+                            return false;
+                        const JSON_Array *listed = json_object_get_array(trusted, type);
+                        bool listed_issuer = json_array_get_count(listed) == 0;
+                        const std::string issuer = ww::identity::did_of(vc.credential_.issuer_.id_);
+                        for (size_t l = 0; !listed_issuer && l < json_array_get_count(listed); l++)
+                            listed_issuer = issuer == json_array_get_string(listed, l);
+                        if (!listed_issuer)
+                            return false;
+                        continue;
+                    }
+
+                    if (ww::identity::contract_id_of(vc.credential_.issuer_.id_) != vc.proof_.verificationMethod_.id_)
+                        return false;
+                    size_t checked = 0;
+                    for (size_t c = 0; c < json_array_get_count(node_outputs); c++)
+                    {
+                        const JSON_Array *checks = json_object_get_array(json_array_get_object(node_outputs, c), "key_checks");
+                        for (size_t x = 0; x < json_array_get_count(checks); x++)
+                        {
+                            const JSON_Object *check = json_array_get_object(checks, x);
+                            if (json_object_get_number(check, "index") != index)
+                                continue;
+                            if (!verify_with_supplied_key(vc, json_object_get_string(check, "key"),
+                                                          json_object_get_string(check, "key_type")))
+                                return false;
+                            checked++;
+                        }
+                    }
+                    if (checked == 0)
+                        return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+// -----------------------------------------------------------------
+// issue_policy_credential for a graph policy: plan, run the active nodes, decide from
+// the root's capabilities, verify every bound credential, and issue the policy_decision
+// whose claims are the capabilities' operation, about their subject.
+// -----------------------------------------------------------------
+static bool issue_graph_policy_credential(const Message &msg, const Environment &env, Response &rsp)
+{
+    std::string error_msg;
+    ww::value::Object graph;
+    ww::value::Object interfaces;
+    ww::value::Object plan;
+    ww::value::Object outputs;
+    std::vector<std::string> vc_json_by_index;
+    ASSERT_SUCCESS(rsp, evaluate_graph_request(msg, graph, interfaces, plan, outputs, vc_json_by_index, error_msg),
+                   error_msg.c_str());
+
+    // a presented input with nothing to take denies before any component runs
+    ww::value::Array missing;
+    plan.get_value("missing", missing);
+    if (missing.get_count() > 0)
+    {
+        ww::value::Object first;
+        missing.get_value(0, first);
+        const std::string reason = std::string("policy evaluation denied, node ") + first.get_string("node") +
+            " input " + first.get_string("input") + " needs a " + first.get_string("type") +
+            " presented in role " + first.get_string("role");
+        return rsp.error(reason.c_str());
+    }
+
+    bool allowed = false;
+    std::string subject;
+    ww::value::Object operation;
+    std::string reason;
+    ASSERT_SUCCESS(rsp, ww::rego::policy_graph::decide(graph, outputs, allowed, subject, operation, reason, error_msg),
+                   error_msg.c_str());
+    ASSERT_SUCCESS(rsp, allowed, ("policy evaluation denied, " + reason).c_str());
+
+    // the planner and the components read unverified claims, so nothing is signed until
+    // every credential they were given verifies
+    ASSERT_SUCCESS(rsp, verify_bound_credentials(graph, interfaces, plan, outputs, vc_json_by_index),
+                   "policy evaluation denied, credential verification failed");
+
+    ww::value::Object serialized_vc_out;
+    ASSERT_SUCCESS(rsp, build_output_credential(env, "policy_decision", subject, operation, serialized_vc_out),
+                   "unexpected error, failed to build the output credential");
+
+    return rsp.value(serialized_vc_out, false);
+}
+
 // -----------------------------------------------------------------
 // METHOD: issue_policy_credential
 //   Standardize the caller's presentations, run every subpolicy, merge their results
@@ -906,6 +1185,10 @@ bool ww::rego::rego_policy_agent::issue_policy_credential(
     ASSERT_INITIALIZED(rsp);
     ASSERT_SUCCESS(rsp, msg.validate_schema(REGO_POLICY_AGENT_ISSUE_PARAM_SCHEMA),
                    "invalid request, missing 'presentation' or 'request'");
+
+    // a policy set by set_policy_graph is evaluated as a graph
+    if (is_graph_policy())
+        return issue_graph_policy_credential(msg, env, rsp);
 
     ww::value::Object presentations;
     ASSERT_SUCCESS(rsp, msg.get_value("presentation", presentations),
@@ -994,4 +1277,285 @@ bool ww::rego::rego_policy_agent::issue_policy_credential(
                    "unexpected error, failed to build the output credential");
 
     return rsp.value(serialized_vc_out, false);
+}
+
+// =================================================================
+// Graph mode methods
+// =================================================================
+
+// -----------------------------------------------------------------
+// METHOD: set_policy_graph
+//   Set the policy as a graph of components, once, in place of set_rego_policy. The
+//   components' interfaces are evaluated, the graph is checked against them by the
+//   graph validator combinator, and its requirement alternatives are expanded; the
+//   default (smallest) alternative becomes the policy's requirements. Each node's
+//   policy_data in the graph becomes its policy data, which set_node_policy_data
+//   replaces later; the stored graph keeps the composition alone.
+//
+// JSON PARAMETERS:
+//   REGO_POLICY_AGENT_SET_GRAPH_PARAM_SCHEMA
+//     { "policy_graph": <graph>, "components": [ [ component_id, source ], ... ] }
+// -----------------------------------------------------------------
+bool ww::rego::rego_policy_agent::set_policy_graph(
+    const Message &msg, const Environment &env, Response &rsp)
+{
+    ASSERT_SENDER_IS_OWNER(env, rsp);
+    ASSERT_INITIALIZED(rsp);
+
+    ASSERT_SUCCESS(rsp, msg.validate_schema(REGO_POLICY_AGENT_SET_GRAPH_PARAM_SCHEMA),
+                   "invalid request, missing 'policy_graph' or 'components'");
+
+    std::string existing;
+    ASSERT_SUCCESS(rsp, !rego_policy_store.get("rego_modules", existing) &&
+                            !rego_policy_store.get("policy_kind", existing),
+                   "invalid request, the rego policy is already set");
+
+    ww::value::Object graph;
+    ww::value::Array components;
+    ASSERT_SUCCESS(rsp, msg.get_value("policy_graph", graph) && msg.get_value("components", components),
+                   "invalid request, missing 'policy_graph' or 'components'");
+
+    std::string error_msg;
+    ww::value::Object interfaces;
+    ASSERT_SUCCESS(rsp, ww::rego::policy_graph::validate_graph(graph, components, interfaces, error_msg),
+                   error_msg.c_str());
+
+    ww::value::Array alternatives;
+    ASSERT_SUCCESS(rsp, ww::rego::policy_graph::compute_alternatives(graph, interfaces, alternatives, error_msg),
+                   error_msg.c_str());
+
+    std::set<std::string> role_set;
+    for (size_t a = 0; a < alternatives.get_count(); a++)
+    {
+        ww::value::Object alternative;
+        alternatives.get_value(a, alternative);
+        const JSON_Object *by_role = json_value_get_object(alternative.get());
+        for (size_t r = 0; r < json_object_get_count(by_role); r++)
+            role_set.insert(json_object_get_name(by_role, r));
+    }
+    ww::value::Array roles;
+    for (const std::string &role : role_set)
+        roles.append_string(role.c_str());
+
+    // split each node's policy data from the composition
+    JSON_Value *composition_value = json_value_deep_copy(graph.get());
+    JSON_Value *policy_data_value = json_value_init_object();
+    JSON_Object *nodes = json_object_get_object(json_value_get_object(composition_value), "nodes");
+    for (size_t n = 0; n < json_object_get_count(nodes); n++)
+    {
+        JSON_Object *node = json_value_get_object(json_object_get_value_at(nodes, n));
+        json_object_set_value(json_value_get_object(policy_data_value), json_object_get_name(nodes, n),
+                              json_value_deep_copy(json_object_get_value(node, "policy_data")));
+        json_object_set_value(node, "policy_data", json_value_init_object());
+    }
+    ww::value::Object stored_graph;
+    ww::value::Object policy_data;
+    const bool split = stored_graph.set(composition_value) != nullptr && policy_data.set(policy_data_value) != nullptr;
+    json_value_free(composition_value);
+    json_value_free(policy_data_value);
+    ASSERT_SUCCESS(rsp, split, "unexpected error, failed to split the policy data from the graph");
+
+    // the hash ties a decision to the exact composition that made it
+    ww::value::Object composition;
+    std::string serialized;
+    ASSERT_SUCCESS(rsp, composition.set_value("policy_graph", stored_graph) &&
+                            composition.set_value("components", components) && composition.serialize(serialized),
+                   "unexpected error, failed to serialize the policy graph");
+    ww::types::ByteArray composition_bytes(serialized.begin(), serialized.end());
+    ww::types::ByteArray hash;
+    std::string graph_hash;
+    ASSERT_SUCCESS(rsp, ww::crypto::hash::sha256_hash(composition_bytes, hash) && ww::crypto::b64_encode(hash, graph_hash),
+                   "unexpected error, failed to hash the policy graph");
+
+    ww::value::Object default_requirements;
+    ASSERT_SUCCESS(rsp, alternatives.get_value(0, default_requirements),
+                   "unexpected error, the graph has no requirement alternative");
+
+    ASSERT_SUCCESS(rsp, stored_graph.serialize(serialized) && rego_policy_store.set("policy_graph", serialized),
+                   "unexpected error, failed to persist the policy graph");
+    ASSERT_SUCCESS(rsp, components.serialize(serialized) && rego_policy_store.set("components", serialized),
+                   "unexpected error, failed to persist the components");
+    ASSERT_SUCCESS(rsp, interfaces.serialize(serialized) && rego_policy_store.set("interfaces", serialized),
+                   "unexpected error, failed to persist the interfaces");
+    ASSERT_SUCCESS(rsp, roles.serialize(serialized) && rego_policy_store.set("roles", serialized),
+                   "unexpected error, failed to persist the roles");
+    ASSERT_SUCCESS(rsp, alternatives.serialize(serialized) && rego_policy_store.set("alternatives", serialized),
+                   "unexpected error, failed to persist the alternatives");
+    ASSERT_SUCCESS(rsp, rego_policy_store.set("graph_hash", graph_hash),
+                   "unexpected error, failed to persist the graph hash");
+    ASSERT_SUCCESS(rsp, default_requirements.serialize(serialized) &&
+                            policy_metadata_store.set("merged_requirements", serialized),
+                   "unexpected error, failed to persist requirements");
+    ASSERT_SUCCESS(rsp, policy_data.serialize(serialized) && policy_metadata_store.set("policy_data", serialized),
+                   "unexpected error, failed to persist the policy data");
+    ASSERT_SUCCESS(rsp, rego_policy_store.set("policy_kind", "graph"),
+                   "unexpected error, failed to persist the policy kind");
+
+    return rsp.success(true);
+}
+
+// -----------------------------------------------------------------
+// METHOD: get_policy_graph
+//   Return the policy graph: anyone who trusts the agent can read what it checks.
+//     { "policy_graph": <graph>, "components": [ [ component_id, source ], ... ],
+//       "sha256": <base64 hash of both> }
+// -----------------------------------------------------------------
+bool ww::rego::rego_policy_agent::get_policy_graph(
+    const Message &msg, const Environment &env, Response &rsp)
+{
+    ASSERT_INITIALIZED(rsp);
+    ASSERT_SUCCESS(rsp, is_graph_policy(), "invalid request, the policy is not a graph");
+
+    ww::value::Object graph;
+    ww::value::Array components;
+    ww::value::Object interfaces;
+    ww::value::Array roles;
+    std::string graph_hash;
+    ASSERT_SUCCESS(rsp, load_graph_policy(graph, components, interfaces, roles) &&
+                            rego_policy_store.get("graph_hash", graph_hash),
+                   "unexpected error, failed to load the policy graph");
+
+    ww::value::Object result;
+    result.set_value("policy_graph", graph);
+    result.set_value("components", components);
+    result.set_string("sha256", graph_hash.c_str());
+    return rsp.value(result, false);
+}
+
+// -----------------------------------------------------------------
+// METHOD: get_requirement_alternatives
+//   Return the bundles of presented credential types that can satisfy the policy, by
+//   role, smallest first, and the default bundle get_requirements returns. A flat
+//   policy has one.
+//     { "default": { role: [ credential_type, ... ] },
+//       "alternatives": [ { role: [ credential_type, ... ] }, ... ] }
+// -----------------------------------------------------------------
+bool ww::rego::rego_policy_agent::get_requirement_alternatives(
+    const Message &msg, const Environment &env, Response &rsp)
+{
+    ASSERT_INITIALIZED(rsp);
+
+    std::string serialized;
+    ASSERT_SUCCESS(rsp, policy_metadata_store.get("merged_requirements", serialized),
+                   "invalid request, no rego policy has been set");
+    ww::value::Object requirements;
+    ASSERT_SUCCESS(rsp, requirements.deserialize(serialized.c_str()),
+                   "unexpected error, failed to deserialize requirements");
+
+    ww::value::Array alternatives;
+    if (is_graph_policy())
+    {
+        ASSERT_SUCCESS(rsp, rego_policy_store.get("alternatives", serialized) &&
+                                alternatives.deserialize(serialized.c_str()),
+                       "unexpected error, failed to load the alternatives");
+    }
+    else
+    {
+        alternatives.append_value(requirements);
+    }
+
+    ww::value::Object result;
+    result.set_value("default", requirements);
+    result.set_value("alternatives", alternatives);
+    return rsp.value(result, false);
+}
+
+// -----------------------------------------------------------------
+// METHOD: set_node_policy_data
+//   Replace the policy data of one node of a graph policy.
+//
+// JSON PARAMETERS:
+//   REGO_POLICY_AGENT_SET_NODE_DATA_PARAM_SCHEMA
+//     { "node": <node id>, "policy_data": { ... } }
+// -----------------------------------------------------------------
+bool ww::rego::rego_policy_agent::set_node_policy_data(
+    const Message &msg, const Environment &env, Response &rsp)
+{
+    ASSERT_SENDER_IS_OWNER(env, rsp);
+    ASSERT_INITIALIZED(rsp);
+
+    ASSERT_SUCCESS(rsp, msg.validate_schema(REGO_POLICY_AGENT_SET_NODE_DATA_PARAM_SCHEMA),
+                   "invalid request, missing 'node' or 'policy_data'");
+    ASSERT_SUCCESS(rsp, is_graph_policy(), "invalid request, the policy is not a graph");
+
+    const char *node_id = msg.get_string("node");
+    ww::value::Object node_data;
+    ASSERT_SUCCESS(rsp, node_id != nullptr && msg.get_value("policy_data", node_data),
+                   "invalid request, missing 'node' or 'policy_data'");
+
+    ww::value::Object graph;
+    ww::value::Array components;
+    ww::value::Object interfaces;
+    ww::value::Array roles;
+    ASSERT_SUCCESS(rsp, load_graph_policy(graph, components, interfaces, roles),
+                   "unexpected error, failed to load the policy graph");
+    const JSON_Object *nodes = json_object_get_object(json_value_get_object(graph.get()), "nodes");
+    ASSERT_SUCCESS(rsp, json_object_has_value(nodes, node_id),
+                   (std::string("invalid request, the graph has no node ") + node_id).c_str());
+
+    std::string serialized;
+    ww::value::Object policy_data;
+    ASSERT_SUCCESS(rsp, policy_metadata_store.get("policy_data", serialized) &&
+                            policy_data.deserialize(serialized.c_str()),
+                   "unexpected error, failed to load the policy data");
+    JSON_Value *updated = json_value_deep_copy(policy_data.get());
+    json_object_set_value(json_value_get_object(updated), node_id, json_value_deep_copy(node_data.get()));
+    const bool kept = policy_data.set(updated) != nullptr && policy_data.serialize(serialized);
+    json_value_free(updated);
+    ASSERT_SUCCESS(rsp, kept && policy_metadata_store.set("policy_data", serialized),
+                   "unexpected error, failed to persist the policy data");
+
+    return rsp.success(true);
+}
+
+// -----------------------------------------------------------------
+// METHOD: explain_policy_decision
+//   Plan and run a graph policy over a presentation, as issue_policy_credential
+//   would, and return what it found; nothing is verified and nothing is signed.
+//     { "plan": { order, bindings, missing }, "outputs": { node: [ credential ] },
+//       "decision": <bool>, and on a denial "reason" }
+//
+// JSON PARAMETERS:
+//   REGO_POLICY_AGENT_ISSUE_PARAM_SCHEMA
+// -----------------------------------------------------------------
+bool ww::rego::rego_policy_agent::explain_policy_decision(
+    const Message &msg, const Environment &env, Response &rsp)
+{
+    ASSERT_INITIALIZED(rsp);
+    ASSERT_SUCCESS(rsp, msg.validate_schema(REGO_POLICY_AGENT_ISSUE_PARAM_SCHEMA),
+                   "invalid request, missing 'presentation' or 'request'");
+    ASSERT_SUCCESS(rsp, is_graph_policy(), "invalid request, the policy is not a graph");
+
+    std::string error_msg;
+    ww::value::Object graph;
+    ww::value::Object interfaces;
+    ww::value::Object plan;
+    ww::value::Object outputs;
+    std::vector<std::string> vc_json_by_index;
+    ASSERT_SUCCESS(rsp, evaluate_graph_request(msg, graph, interfaces, plan, outputs, vc_json_by_index, error_msg),
+                   error_msg.c_str());
+
+    ww::value::Object result;
+    result.set_value("plan", plan);
+    result.set_value("outputs", outputs);
+
+    ww::value::Array missing;
+    plan.get_value("missing", missing);
+    if (missing.get_count() > 0)
+    {
+        result.set_boolean("decision", false);
+        result.set_string("reason", "missing inputs");
+        return rsp.value(result, false);
+    }
+
+    bool allowed = false;
+    std::string subject;
+    ww::value::Object operation;
+    std::string reason;
+    ASSERT_SUCCESS(rsp, ww::rego::policy_graph::decide(graph, outputs, allowed, subject, operation, reason, error_msg),
+                   error_msg.c_str());
+    result.set_boolean("decision", allowed);
+    if (!allowed)
+        result.set_string("reason", reason.c_str());
+    return rsp.value(result, false);
 }

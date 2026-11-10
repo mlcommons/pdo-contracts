@@ -118,6 +118,34 @@
         SCHEMA_KW(claims, {})                   \
     "}"
 
+// The top level of a policy graph; the graph validator combinator checks the rest.
+//   { "version": 2, "name", "root", "nodes": { <node>: { component, inputs, policy_data } },
+//     "trusted_issuers": { <credential type>: [ <DID>, ... ] } }
+#define REGO_POLICY_GRAPH_SCHEMA                \
+    "{"                                         \
+        SCHEMA_KW(version, 0) ","               \
+        SCHEMA_KW(name, "") ","                 \
+        SCHEMA_KW(root, "") ","                 \
+        SCHEMA_KW(nodes, {}) ","                \
+        SCHEMA_KW(trusted_issuers, {})          \
+    "}"
+
+// set_policy_graph: set the policy as a graph of components, once, instead of
+// set_rego_policy (see rego/policy_graph.h and docs/policy_graph.md).
+//   { "policy_graph": <graph>, "components": [ [ component_id, source ], ... ] }
+#define REGO_POLICY_AGENT_SET_GRAPH_PARAM_SCHEMA                        \
+    "{"                                                                 \
+        SCHEMA_KWS(policy_graph, REGO_POLICY_GRAPH_SCHEMA) ","          \
+        SCHEMA_KWS(components, "[[\"\"]]")                              \
+    "}"
+
+// set_node_policy_data: replace one node's policy data
+#define REGO_POLICY_AGENT_SET_NODE_DATA_PARAM_SCHEMA    \
+    "{"                                                 \
+        SCHEMA_KW(node, "") ","                         \
+        SCHEMA_KW(policy_data, {})                      \
+    "}"
+
 namespace ww
 {
 namespace rego
@@ -138,6 +166,23 @@ namespace rego_policy_agent
     // if the policy allows -- issue a signed credential of the policy's type, as
     // the one subpolicy that describes it says
     bool issue_policy_credential(const Message& msg, const Environment& env, Response& rsp);
+
+    // set the policy as a graph of components, once
+    bool set_policy_graph(const Message& msg, const Environment& env, Response& rsp);
+
+    // return the graph, its components and the hash of both
+    bool get_policy_graph(const Message& msg, const Environment& env, Response& rsp);
+
+    // return every bundle of presented credentials that can satisfy the policy, by
+    // role, smallest first, and the default (the first)
+    bool get_requirement_alternatives(const Message& msg, const Environment& env, Response& rsp);
+
+    // replace one node's policy data
+    bool set_node_policy_data(const Message& msg, const Environment& env, Response& rsp);
+
+    // plan and run a graph policy over a presentation and return the plan, each
+    // node's output and the verdict; nothing is verified or signed
+    bool explain_policy_decision(const Message& msg, const Environment& env, Response& rsp);
 
 }; // rego_policy_agent
 }; // rego

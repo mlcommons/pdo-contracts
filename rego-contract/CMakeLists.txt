@@ -21,6 +21,18 @@ ADD_CUSTOM_TARGET(
 )
 
 # -----------------------------------------------------------------
+# The graph combinators are Rego sources shared with the reference implementation
+# (pdo/rego/graph); embed them in a generated header.
+# -----------------------------------------------------------------
+SET(REGO_GRAPH_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/pdo/rego/graph)
+SET(REGO_GENERATED_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+FILE(READ ${REGO_GRAPH_SOURCES}/graph_validator.rego REGO_GRAPH_VALIDATOR)
+FILE(READ ${REGO_GRAPH_SOURCES}/graph_planner.rego REGO_GRAPH_PLANNER)
+CONFIGURE_FILE(src/rego/rego_graph_combinators.h.in ${REGO_GENERATED_INCLUDE_DIR}/rego/rego_graph_combinators.h @ONLY)
+SET_PROPERTY(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  ${REGO_GRAPH_SOURCES}/graph_validator.rego ${REGO_GRAPH_SOURCES}/graph_planner.rego)
+
+# -----------------------------------------------------------------
 ADD_LIBRARY(${${CF_HANDLE}_LIB} STATIC ${${CF_HANDLE}_SOURCES})
 SET_PROPERTY(TARGET ${${CF_HANDLE}_LIB} APPEND_STRING PROPERTY COMPILE_OPTIONS "${WASM_BUILD_OPTIONS}" "-Wno-deprecated")
 SET_PROPERTY(TARGET ${${CF_HANDLE}_LIB} APPEND_STRING PROPERTY LINK_OPTIONS "${WASM_LINK_OPTIONS}")
@@ -32,6 +44,7 @@ TARGET_INCLUDE_DIRECTORIES(${${CF_HANDLE}_LIB} PUBLIC ${IDENTITY_INCLUDES})
 TARGET_INCLUDE_DIRECTORIES(${${CF_HANDLE}_LIB} PUBLIC ${WASM_INCLUDES})
 TARGET_INCLUDE_DIRECTORIES(${${CF_HANDLE}_LIB} PUBLIC ${OPENSSL_WASM_INCLUDE_DIR})
 TARGET_INCLUDE_DIRECTORIES(${${CF_HANDLE}_LIB} PUBLIC ${REGORUS_WASM_INCLUDE_DIR})
+TARGET_INCLUDE_DIRECTORIES(${${CF_HANDLE}_LIB} PRIVATE ${REGO_GENERATED_INCLUDE_DIR})
 
 ADD_DEPENDENCIES(${${CF_HANDLE}_LIB} openssl_wasm)
 ADD_DEPENDENCIES(${${CF_HANDLE}_LIB} regorus_wasm)

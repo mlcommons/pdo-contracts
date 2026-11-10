@@ -203,6 +203,51 @@ bool ww::rego::rego_evaluator::eval_rego_query(
 }
 
 // -----------------------------------------------------------------
+// Return the packages a Rego policy defines, as a JSON list of data paths, from its
+// own fresh engine. On failure error_msg explains why.
+// -----------------------------------------------------------------
+bool ww::rego::rego_evaluator::get_rego_packages(
+    const char *source,
+    std::string &packages_json,
+    std::string &error_msg)
+{
+    RegorusEngine *engine = regorus_engine_new();
+    if (engine == nullptr)
+    {
+        error_msg.assign("unexpected error, failed to create regorus engine");
+        return false;
+    }
+
+    bool ok = true;
+
+    RegorusResult r = regorus_engine_add_policy(engine, "policy.rego", source);
+    if (r.status != Ok)
+    {
+        error_msg.assign(r.error_message ? r.error_message : "add_policy failed");
+        ok = false;
+    }
+    regorus_result_drop(r);
+
+    if (ok)
+    {
+        r = regorus_engine_get_packages(engine);
+        if (r.status != Ok || r.output == nullptr)
+        {
+            error_msg.assign(r.error_message ? r.error_message : "get_packages failed");
+            ok = false;
+        }
+        else
+        {
+            packages_json.assign(r.output);
+        }
+        regorus_result_drop(r);
+    }
+
+    regorus_engine_drop(engine);
+    return ok;
+}
+
+// -----------------------------------------------------------------
 // METHOD: evaluate
 //   Evaluate an arbitrary Rego policy over an arbitrary input at an arbitrary
 //   entrypoint and return the output. The contract is stateless.

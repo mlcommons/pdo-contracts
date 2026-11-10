@@ -11,4 +11,6 @@ Most similar test to the decentralized setup.
   - Run `stateless_test.py`
   - Run `rego_policy_agent_test.py` (the policy agent as an asset's policy and as a
     rule-based authority)
+  - Run `policy_graph_test.py ../graphs/download` (a graph policy, decided by the
+    graph's vectors)
   - Run `cleanup.py`

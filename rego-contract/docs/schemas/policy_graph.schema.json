@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "policy_graph.schema.json",
+  "title": "Policy graph",
+  "description": "What set_policy_graph takes as policy_graph. The validator combinator also checks what a schema cannot: bound inputs, matching types, no cycle, every node leading to the root.",
+  "type": "object",
+  "properties": {
+    "version": {"const": 2},
+    "name": {"type": "string", "minLength": 1},
+    "root": {"$ref": "#/$defs/id"},
+    "nodes": {
+      "type": "object",
+      "maxProperties": 32,
+      "propertyNames": {"$ref": "#/$defs/id"},
+      "additionalProperties": {"$ref": "#/$defs/node"}
+    },
+    "trusted_issuers": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/id"},
+      "additionalProperties": {"type": "array", "items": {"type": "string", "minLength": 1}}
+    }
+  },
+  "required": ["version", "name", "root", "nodes", "trusted_issuers"],
+  "additionalProperties": false,
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9_]+$"},
+    "node": {
+      "type": "object",
+      "properties": {
+        "component": {"$ref": "#/$defs/id"},
+        "inputs": {
+          "type": "object",
+          "maxProperties": 8,
+          "propertyNames": {"$ref": "#/$defs/id"},
+          "additionalProperties": {
+            "oneOf": [
+              {"$ref": "#/$defs/source"},
+              {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/node_source_only"}}
+            ]
+          }
+        },
+        "policy_data": {"type": "object"}
+      },
+      "required": ["component", "inputs", "policy_data"],
+      "additionalProperties": false
+    },
+    "source": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {"from": {"const": "presented"}},
+          "required": ["from"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "from": {"const": "node"},
+            "node": {"$ref": "#/$defs/id"},
+            "accept_presented": {"type": "boolean"}
+          },
+          "required": ["from", "node", "accept_presented"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "node_source_only": {
+      "type": "object",
+      "properties": {
+        "from": {"const": "node"},
+        "node": {"$ref": "#/$defs/id"},
+        "accept_presented": {"const": false}
+      },
+      "required": ["from", "node", "accept_presented"],
+      "additionalProperties": false
+    }
+  }
+}

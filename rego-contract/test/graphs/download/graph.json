@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "name": "Membership download",
+  "root": "download",
+  "nodes": {
+    "member": {
+      "component": "member",
+      "inputs": {"membership": {"from": "presented"}},
+      "policy_data": {"allowedInstitutions": ["Hyperledger", "Intel"]}
+    },
+    "download": {
+      "component": "download",
+      "inputs": {
+        "key": {"from": "presented"},
+        "grant": {"from": "node", "node": "member", "accept_presented": true}
+      },
+      "policy_data": {}
+    }
+  },
+  "trusted_issuers": {"membership": [], "membership_grant": [], "public_key": []}
+}

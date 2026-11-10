@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "component_interface.schema.json",
+  "title": "Component interface",
+  "description": "The value of a component's interface rule, evaluated with no input.",
+  "type": "object",
+  "properties": {
+    "output": {"type": "string", "pattern": "^[A-Za-z0-9_]+$"},
+    "inputs": {
+      "type": "object",
+      "maxProperties": 8,
+      "propertyNames": {"pattern": "^[A-Za-z0-9_]+$"},
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "type": {"type": "string", "pattern": "^[A-Za-z0-9_]+$", "not": {"const": "Capability"}},
+          "role": {"type": "string", "pattern": "^[A-Za-z0-9_]+$"},
+          "supplied_key": {"const": true}
+        },
+        "required": ["type", "role"],
+        "additionalProperties": false
+      }
+    },
+    "policy_data_schema": {"type": "object"}
+  },
+  "required": ["output", "inputs", "policy_data_schema"],
+  "additionalProperties": false
+}

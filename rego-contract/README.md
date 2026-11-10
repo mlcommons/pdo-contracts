@@ -58,8 +58,23 @@ agent allows only if every subpolicy allows and that one describes the
 credential; it then verifies the credentials the subpolicies relied on, and signs
 a credential of the declared type.
 
+## Graph policies
+
+Instead of subpolicies, an asset's policy may be a graph of Rego components that pass
+credentials to each other, set once by `set_policy_graph`. Each component reads
+credentials and outputs credentials, the root issues the capability, and a trusted
+planner decides per request which components run and whether a presented credential
+stands in for a component's output. `get_requirement_alternatives` lists the bundles of
+credentials that satisfy the graph, `set_node_policy_data` sets one node's policy data,
+and `explain_policy_decision` shows how a presentation fares without signing anything.
+[docs/policy_graph.md](docs/policy_graph.md) is the spec; `pdo.rego.graph` is its
+reference implementation and `pdo-rego-graph` its command line.
+
 ## Tests
 
-`test/script_test.sh` (the CLI flow, through a guardian), `test/python/` (the
-Python API: `stateless_test.py`, and `rego_policy_agent_test.py` for both roles of
-the policy agent).
+`test/script_test.sh` (the CLI flow, through a guardian, for a flat and a graph
+policy), `test/python/` (the Python API: `stateless_test.py`,
+`rego_policy_agent_test.py` for both roles of the policy agent, and
+`policy_graph_test.py`, which decides a graph's vectors on-chain), and
+`test/graph_test.sh` (graph mode without a ledger: the graph combinators on OPA and
+regorus, and the vectors of `test/graphs/` through the reference implementation).
