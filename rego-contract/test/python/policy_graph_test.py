@@ -8,9 +8,13 @@ The components folder holds <id>/component.rego, and the vectors follow the form
 pdo.rego.graph.vectors describes; ../graphs/download/ has all three. Every DID the vectors
 name as an issuer or signer becomes a signature authority, the registry they describe
 becomes the agent's trusted issuers, and each vector is presented from fresh wallets, one
-per role. The contract must reach the decision the vector expects: an allow must issue the
-expected operation about the expected subject, and a denial for missing inputs must name the
-same inputs in explain_policy_decision.
+per role. A credential with a "signing_key" is signed by an authority of its own standing
+for that key, under the signer it names, and the key's name stands for that authority's
+PEM wherever the vectors use it. The names of the issuers and keys are replaced by their
+DIDs and PEMs throughout: subjects, claims, policy data, request and expectations. The
+contract must reach the decision the vector expects: an allow must issue the expected
+operation about the expected subject, and a denial for missing inputs must name the same
+inputs in explain_policy_decision.
 """
 
 import base64
@@ -99,6 +103,33 @@ for placeholder in placeholders:
     authorities[placeholder] = contract_id
 dids = {placeholder: f"did:pdo:{contract_id}" for placeholder, contract_id in authorities.items()}
 
+key_names = sorted(
+    {c["signing_key"] for vector in SUITE["vectors"] for c in credentials_of(vector).values() if "signing_key" in c}
+)
+key_holders, pems = {}, {}
+for key_name in key_names:
+    contract_id = created(signature_authority.create_signature_authority(state, ISSUER, description=key_name))
+    signature_authority.register_signing_context(
+        state, contract_id, ISSUER, path=["vc"], description=key_name, extensible=False
+    )
+    key_holders[key_name] = contract_id
+    pems[key_name] = json.loads(signature_authority.get_verifying_key(
+        state, contract_id, ISSUER, path=["vc"], extended=False, filename=None
+    ))
+real = {**dids, **pems}
+
+
+def renamed(value):
+    """The value with every issuer and key name replaced by its DID or PEM."""
+    if isinstance(value, dict):
+        return {k: renamed(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [renamed(v) for v in value]
+    if isinstance(value, str) and value in real:
+        return real[value]
+    return value
+
+
 # ---------------------------------------------------------------- the agent
 agent = created(policy_agent.create_rego_policy_agent(state, OWNER, description=GRAPH["name"]))
 trusted_types = {}
@@ -113,7 +144,8 @@ for signer, types in sorted(trusted_types.items()):
 graph = copy.deepcopy(GRAPH)
 graph["trusted_issuers"] = {t: [dids[d] for d in listed] for t, listed in GRAPH["trusted_issuers"].items()}
 for node_id, node in graph["nodes"].items():
-    node["policy_data"] = SUITE["policy_data"][node_id]
+    node["policy_data"] = renamed(SUITE["policy_data"][node_id])
+REQUEST = renamed(SUITE["request"])
 policy_agent.set_policy_graph(
     state, agent, OWNER, graph=write_json("policy_graph.json", graph), components=COMPONENTS
 )
@@ -122,18 +154,26 @@ signed_cache = {}
 
 
 def signed(name, credential):
-    """The credential, naming its issuer and signed by its signer."""
+    """The credential, naming its issuer and signed by its signer, or with its signing key under
+    its signer's name."""
     key = json.dumps(credential, sort_keys=True)
     if key not in signed_cache:
         unsigned = write_json(f"{name}.json", {
             "type": [credential["type"]],
             "issuer": {"id": dids[credential["issuer"]]},
-            "credentialSubject": {"subject": {"id": credential["subject"]}, "claims": credential["claims"]},
+            "credentialSubject": {
+                "subject": {"id": renamed(credential["subject"])}, "claims": renamed(credential["claims"])
+            },
         })
         path = scratch(f"{name}_{len(signed_cache)}_signed.json")
+        signer = key_holders[credential["signing_key"]] if "signing_key" in credential else authorities[credential["signer"]]
         signature_authority.sign_credential(
-            state, authorities[credential["signer"]], ISSUER, path=["vc"], credential=unsigned, signed_credential=path
+            state, signer, ISSUER, path=["vc"], credential=unsigned, signed_credential=path
         )
+        if "signing_key" in credential:
+            vc = read_json(path)
+            vc["proof"]["verificationMethod"]["id"] = authorities[credential["signer"]]
+            write_json(os.path.basename(path), vc)
         signed_cache[key] = path
     return signed_cache[key]
 
@@ -160,7 +200,7 @@ def decided(vector, number):
     issued = scratch(f"vector_{number}_decision.json")
     try:
         policy_agent.issue_policy_credential(
-            state, agent, HOLDER, presentation=presentation_file, request=SUITE["request"], issued_credential=issued
+            state, agent, HOLDER, presentation=presentation_file, request=REQUEST, issued_credential=issued
         )
         error = None
     except Exception as e:
@@ -172,13 +212,13 @@ def decided(vector, number):
             return False, error
         claims = json.loads(base64.b64decode(read_json(issued)["serializedCredential"]))["credentialSubject"]
         got = {"subject": claims["subject"]["id"], "operation": claims["claims"]}
-        return got == {"subject": expect["subject"], "operation": expect["operation"]}, got
+        return got == renamed({"subject": expect["subject"], "operation": expect["operation"]}), got
 
     if error is None:
         return False, "allowed"
     if "missing" in expect:
         explained = policy_agent.explain_policy_decision(
-            state, agent, HOLDER, presentation=presentation_file, request=SUITE["request"]
+            state, agent, HOLDER, presentation=presentation_file, request=REQUEST
         )
         missing = sorted(
             ({"node": m["node"], "input": m["input"]} for m in explained["plan"]["missing"]), key=json.dumps
