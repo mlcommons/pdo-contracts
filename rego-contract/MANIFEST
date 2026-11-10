@@ -27,4 +27,5 @@ pdo/rego/graph/engine.py
 pdo/rego/graph/graph_planner.rego
 pdo/rego/graph/graph_validator.rego
 pdo/rego/graph/policy_graph.py
+pdo/rego/graph/requirements.py
 pdo/rego/graph/vectors.py
