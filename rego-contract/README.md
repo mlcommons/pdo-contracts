@@ -17,10 +17,11 @@ A `rego_policy_agent` plays two roles, set by the type it issues:
 - a rule-based authority issues a fact, such as an ethics approval, that other
   policy agents accept from it.
 
-Its policy -- its subpolicies, one of which declares the type it issues -- is
-set once by `set_rego_policy` and never changes, so accepting a policy agent
-means accepting one auditable policy, which anyone can read with
-`get_rego_policy`. Its trusted issuers (`register_trusted_issuer`,
+Its policy -- its subpolicies, one of which declares the type it issues, or a
+graph of components (see [Graph policies](#graph-policies)) -- is set once, by
+`set_rego_policy` or `set_policy_graph`, and never changes, so accepting a policy
+agent means accepting one auditable policy, which anyone can read with
+`get_rego_policy` or `get_policy_graph`. Its trusted issuers (`register_trusted_issuer`,
 `unregister_trusted_issuer`, `list_trusted_issuers`) and policy data are the
 identity family's `policy_agent`'s, and stay its owner's to manage. It has no
 `sign` method: the only credentials its keys sign are the ones its policy allowed.
@@ -34,7 +35,7 @@ A subpolicy is a Rego module in `package subpolicy` with two rules:
 
   ```json
   {
-    "presentations": { "<role>": [ { "type", "issuer", "signer", "trusted", "subject", "claims", "index" } ] },
+    "presentations": { "<role>": [ { "type", "issuer", "signer", "trusted", "subject", "claims", "index", "proof_value" } ] },
     "holders": { "<role>": "<did of the role's presentation holder>" },
     "request": { },
     "trusted_issuers": { },
@@ -64,17 +65,23 @@ Instead of subpolicies, an asset's policy may be a graph of Rego components that
 credentials to each other, set once by `set_policy_graph`. Each component reads
 credentials and outputs credentials, the root issues the capability, and a trusted
 planner decides per request which components run and whether a presented credential
-stands in for a component's output. `get_requirement_alternatives` lists the bundles of
+stands in for a component's output. `get_policy_graph` returns the graph, its
+components and their hash, `get_requirement_alternatives` lists the bundles of
 credentials that satisfy the graph, `set_node_policy_data` sets one node's policy data,
 and `explain_policy_decision` shows how a presentation fares without signing anything.
-[docs/policy_graph.md](docs/policy_graph.md) is the spec; `pdo.rego.graph` is its
+[docs/policy_graph.md](docs/policy_graph.md) is the spec, with the methods, the
+`rego_policy_agent` commands, the limits and the denial reasons; `pdo.rego.graph` is its
 reference implementation and `pdo-rego-graph` its command line.
 
 ## Tests
 
-`test/script_test.sh` (the CLI flow, through a guardian, for a flat and a graph
-policy), `test/python/` (the Python API: `stateless_test.py`,
-`rego_policy_agent_test.py` for both roles of the policy agent, and
-`policy_graph_test.py`, which decides a graph's vectors on-chain), and
-`test/graph_test.sh` (graph mode without a ledger: the graph combinators on OPA and
-regorus, and the vectors of `test/graphs/` through the reference implementation).
+- `test/script_test.sh`: the CLI flow, through a guardian, for a flat and a graph
+  policy. CTest runs it as `system-rego-script` (`test/README.md`).
+- `test/python/`: the Python API against a ledger -- `stateless_test.py`,
+  `rego_policy_agent_test.py` for both roles of the policy agent, and
+  `policy_graph_test.py`, which decides a graph's vectors on-chain
+  (`test/python/README.md`).
+- `test/graph_test.sh`: graph mode without a ledger -- the graph combinators on OPA and
+  regorus, the vectors of `test/graphs/` through the reference implementation, and the
+  JSON schemas. It needs `opa` and python3 with `jsonschema` and the regorus bindings
+  (built as `pdo/rego/graph/engine.py` describes), and is not part of `make test`.

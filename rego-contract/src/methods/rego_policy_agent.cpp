@@ -62,10 +62,12 @@
 //     "graph_hash"    -- base64 sha256 of the graph and the components, for audits
 //   policy_metadata_store : the SAME store the inherited policy_agent methods
 //     use. We read "policy_data" / "trusted_issuers" for the Rego input, and
-//     write the merged "requirements" there so get_requirements can return them.
+//     write the merged "requirements" there so get_requirements can return them
+//     (for a graph, its first requirement alternative); set_policy_graph also
+//     writes "policy_data" there, each node's under its node id.
 //
-// Every subpolicy and both combinators run in their OWN regorus engine (see
-// eval_rego), so the fixed module name and entrypoints never collide.
+// Every subpolicy, every component and each combinator run in their OWN regorus
+// engine (see eval_rego), so the fixed module name and entrypoints never collide.
 // -----------------------------------------------------------------
 static KeyValueStore rego_policy_store("rego_policy_store");
 static KeyValueStore policy_metadata_store("policy_metadata_store");
@@ -387,7 +389,8 @@ bool ww::rego::rego_policy_agent::set_rego_policy(
 
 // -----------------------------------------------------------------
 // METHOD: get_requirements
-//   Return the merged per-role requirements set by set_rego_policy:
+//   Return the merged per-role requirements set by set_rego_policy, or a graph's
+//   first requirement alternative set by set_policy_graph:
 //   { role: [ credential_type, ... ], ... }
 // -----------------------------------------------------------------
 bool ww::rego::rego_policy_agent::get_requirements(
@@ -1165,15 +1168,17 @@ static bool issue_graph_policy_credential(const Message &msg, const Environment 
 //   Standardize the caller's presentations, run every subpolicy, merge their results
 //   with the results combinator, and -- if the policy allows -- verify the
 //   credentials the merged result flags and issue the signed credential the one
-//   subpolicy described, of the policy's type.
+//   subpolicy described, of the policy's type. A graph policy is evaluated by
+//   issue_graph_policy_credential instead (docs/policy_graph.md).
 //
 // JSON PARAMETERS:
 //   REGO_POLICY_AGENT_ISSUE_PARAM_SCHEMA
 //     { "presentation": { role: <verifiable presentation>, ... }, "request": { ... } }
 //   The keyword is "presentation" (singular), as in the inherited policy_agent
-//   issue op; its value is the role -> verifiable presentation map. It is also
-//   validated against the per-role schema stored by set_rego_policy (required
-//   roles present, each value a verifiable presentation).
+//   issue op; its value is the role -> verifiable presentation map. For a flat
+//   policy it is also validated against the per-role schema stored by
+//   set_rego_policy (required roles present, each value a verifiable
+//   presentation); a graph policy accepts any roles some alternative reads.
 //
 // RETURNS:
 //   VERIFIABLE_CREDENTIAL_SCHEMA -- the signed credential, or an error saying

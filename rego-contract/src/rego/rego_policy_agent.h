@@ -38,10 +38,11 @@
 // issue_policy_credential: supply the presentations to judge under the
 // "presentation" keyword as an object keyed by role,
 // { role: <verifiable presentation>, ... }, and the values the requester
-// declares (for instance the project) under "request", handed to every
-// subpolicy as input.request. The detailed shape (which roles, each value a
-// verifiable presentation) is checked against the schema that set_rego_policy
-// stored, so this top-level schema only requires objects.
+// declares (for instance a channel key) under "request", handed to every
+// subpolicy or component as input.request. The detailed shape (which roles, each
+// value a verifiable presentation) is checked against the schema that
+// set_rego_policy stored, or against the roles a graph's alternatives read, so
+// this top-level schema only requires objects.
 #define REGO_POLICY_AGENT_ISSUE_PARAM_SCHEMA            \
     "{"                                                 \
         SCHEMA_KW(presentation, {}) ","                 \
@@ -159,7 +160,8 @@ namespace rego_policy_agent
     // pairs, and the merged requirements
     bool get_rego_policy(const Message& msg, const Environment& env, Response& rsp);
 
-    // return the merged per-role credential requirements set by set_rego_policy
+    // return the merged per-role credential requirements set by set_rego_policy,
+    // or a graph's first requirement alternative
     bool get_requirements(const Message& msg, const Environment& env, Response& rsp);
 
     // run every subpolicy, merge the results, verify the flagged credentials, and --

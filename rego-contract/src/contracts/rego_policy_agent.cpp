@@ -33,8 +33,9 @@
 // policy_agent specialization hook.
 //   The inherited ww::identity::policy_agent::set_policy_data validates the
 //   incoming policy data against this schema. Policy data is opaque to this
-//   contract (each subpolicy gets its own slice as input.policy_data), so the
-//   schema is permissive. The get_claims_schemas / policy_agent_function hooks
+//   contract (each subpolicy, or each node of a graph, gets its own slice as
+//   input.policy_data), so the schema is permissive. The get_claims_schemas /
+//   policy_agent_function hooks
 //   are only referenced by policy_agent methods this contract does NOT register
 //   (issue_policy_credential / get_requirements) and are dropped by the linker.
 // -----------------------------------------------------------------

@@ -1,22 +1,21 @@
 # Tests
 
-- Legacy-style CLI test (useful for quick tests):
-  - Script: `script_test.sh`
+- CLI test, against a ledger:
+  - Scripts: `script_test.sh` (a flat and a graph policy, through a guardian) and
+    `script_test_rego.sh` (the stateless evaluator).
   - How to run:
-    - Run the ledger and the services containers
-    - Copy ledger root cert and services site.toml to the correct locations.
-    - Run `TEST_LIST=^system-identity-script make -C ${PDO_CONTRACTS_ROOT} test`
+    - Run the ledger and the services containers, and a guardian.
+    - Copy the ledger's root cert and the services' site.toml to the correct locations.
+    - Run `TEST_LIST=^system-rego-script make -C ${PDO_CONTRACTS_ROOT} test`
+      (`^system-rego-rego_script` for the evaluator).
 
-- Setup-decoupled CLI test:
-  - Script: `script_test_v2.sh`. It sources `setup_test.sh`. No auto-cleanup.
-  - One can run `setup_test.sh` alone then run arbitrary commands then run `cleanup.sh`.
-  - How to run:
-    - Run the ledger and the services containers
-    - Run a guardian
-    - Generate keys
-    - Export necessary env vars
-    - Run `script_test_v2.sh`
-    - Run `cleanup.sh`
+- Python test, against a ledger:
+  - Folder: `python`; see `python/README.md`.
 
-- Python test:
-  - Folder: `python`
+- Graph mode, without a ledger:
+  - Script: `graph_test.sh`. It runs the graph combinators' tests (`combinators/`) on OPA
+    and on regorus, every graph in `graphs/` through the reference implementation
+    (`pdo-rego-graph eval`), and `graphs/check_schemas.py`.
+  - Needs `opa`, and python3 with `jsonschema` and the regorus bindings (built as
+    `../pdo/rego/graph/engine.py` describes).
+  - How to run: `bash rego-contract/test/graph_test.sh`.

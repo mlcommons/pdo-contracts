@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "policy_graph.schema.json",
   "title": "Policy graph",
-  "description": "What set_policy_graph takes as policy_graph. The validator combinator also checks what a schema cannot: bound inputs, matching types, no cycle, every node leading to the root.",
+  "description": "What set_policy_graph takes as policy_graph. The validator combinator also checks what a schema cannot: every input bound, matching types, list sources of two or more distinct nodes, supplied_key inputs presented, trusted_issuers keyed by exactly the types taken from the registry, no cycle, every node leading to the root, only the root outputting a Capability and no input taking one, and every component used.",
   "type": "object",
   "properties": {
     "version": {"const": 2},

@@ -32,9 +32,18 @@ A vector file names its credentials once and builds each case from them:
     }
 
 A credential is trusted, as the contract computes it, when its issuer is its signer and the
-registry lists that signer for its type. A credential a component checks against a key it
-supplies also has "signing_key": the key check passes when the supplied key is that one.
-Indices are given in presentation order, roles sorted.
+registry lists that signer for its type; every type a credential has must be a key of
+"registry" (``[]`` when no signer is trusted for it). A credential a component checks against
+a key it supplies also has "signing_key", a name standing for the key wherever a claim or the
+policy data carries it: the key check passes when the key is ``"ec"``, the credential's issuer
+is its signer, and the supplied key is that name. (The on-chain test,
+``test/python/policy_graph_test.py``, signs such a credential with a real key and puts its PEM
+wherever the name appears.)
+
+An allow compares the subject and operation the root issued, its "evidence" (the presented
+credentials the root's capabilities cite, as the union of their evidence) and its "verified"
+(every presented credential bound to a node that ran), as sets of names. A denial compares
+"missing" as a set, or "reason" exactly. Indices are given in presentation order, roles sorted.
 """
 
 import copy
