@@ -60,8 +60,8 @@ Python, and `pdo-rego-graph` its command line.
 - There is no cycle, every node leads to the root, only the root outputs a `Capability`, no
   input takes one, and every component sent with the graph is used by a node.
 
-`docs/schemas/policy_graph.schema.json` has the shape; the validator combinator
-(`pdo/rego/graph/graph_validator.rego`) is the authority.
+The validator combinator (`pdo/rego/graph/graph_validator.rego`) checks all of this when the
+graph is set.
 
 ## Components
 
@@ -209,9 +209,7 @@ pdo-rego-graph eval         --graph graph.json --components DIR --vectors graph_
 
 `DIR` holds `<component id>/component.rego`. The vector format is in
 `pdo/rego/graph/vectors.py`; `test/graphs/download/` has a graph, its components and its
-vectors. `docs/schemas/` has JSON Schemas for a graph, a component interface and a component's
-output credential; `test/graphs/check_schemas.py` checks the test graphs against them. The
-validator combinator, not the schema, is the authority on what a graph may be.
+vectors.
 
 ## Commands
 
@@ -232,6 +230,6 @@ decision for either kind of policy. `test/script_test.sh` runs them all against 
 
 | Test | Needs | Runs |
 | --- | --- | --- |
-| `test/graph_test.sh` | `opa`, python3 with `jsonschema` and the regorus bindings | the combinators on OPA and on regorus, every graph in `test/graphs/` through the reference implementation, the schemas |
+| `test/graph_test.sh` | `opa`, python3 with the regorus bindings | the combinators on OPA and on regorus, every graph in `test/graphs/` through the reference implementation |
 | `test/script_test.sh` | a ledger, services and a guardian (`make test`, `TEST_LIST=^system-rego-script`) | the CLI, for a flat and a graph policy |
 | `test/python/policy_graph_test.py GRAPH COMPONENTS VECTORS` | a ledger and services (see `test/python/README.md`) | a graph's vectors, decided on-chain |

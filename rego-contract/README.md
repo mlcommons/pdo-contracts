@@ -82,6 +82,6 @@ reference implementation and `pdo-rego-graph` its command line.
   `policy_graph_test.py`, which decides a graph's vectors on-chain
   (`test/python/README.md`).
 - `test/graph_test.sh`: graph mode without a ledger -- the graph combinators on OPA and
-  regorus, the vectors of `test/graphs/` through the reference implementation, and the
-  JSON schemas. It needs `opa` and python3 with `jsonschema` and the regorus bindings
-  (built as `pdo/rego/graph/engine.py` describes), and is not part of `make test`.
+  regorus, and the vectors of `test/graphs/` through the reference implementation. It
+  needs `opa` and python3 with the regorus bindings (built as `pdo/rego/graph/engine.py`
+  describes), and is not part of `make test`.

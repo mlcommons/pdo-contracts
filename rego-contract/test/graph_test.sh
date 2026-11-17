@@ -13,9 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Graph mode without a ledger: the graph combinators on OPA and on regorus, the vectors of
-# every graph in test/graphs/ through the reference implementation, and the JSON schemas.
-# Needs opa, and python3 with jsonschema and the regorus bindings (pdo/rego/graph/engine.py).
+# Graph mode without a ledger: the graph combinators on OPA and on regorus, and the vectors of
+# every graph in test/graphs/ through the reference implementation.
+# Needs opa, and python3 with the regorus bindings (pdo/rego/graph/engine.py).
 set -e
 cd "$(dirname "$0")/.."
 export PYTHONPATH=$PWD
@@ -27,4 +27,3 @@ for graph in test/graphs/*/graph.json; do
     python3 -m pdo.rego.graph.cli eval --graph "$graph" --components "$folder/components" \
         --vectors "$folder/graph_vectors.json"
 done
-python3 test/graphs/check_schemas.py

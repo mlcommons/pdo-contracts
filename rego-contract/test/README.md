@@ -14,8 +14,8 @@
 
 - Graph mode, without a ledger:
   - Script: `graph_test.sh`. It runs the graph combinators' tests (`combinators/`) on OPA
-    and on regorus, every graph in `graphs/` through the reference implementation
-    (`pdo-rego-graph eval`), and `graphs/check_schemas.py`.
-  - Needs `opa`, and python3 with `jsonschema` and the regorus bindings (built as
+    and on regorus, and every graph in `graphs/` through the reference implementation
+    (`pdo-rego-graph eval`).
+  - Needs `opa`, and python3 with the regorus bindings (built as
     `../pdo/rego/graph/engine.py` describes).
   - How to run: `bash rego-contract/test/graph_test.sh`.
