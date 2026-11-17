@@ -29,7 +29,14 @@ namespace identity
 {
     // The contract id behind an identifier. A PDO DID loses its prefix and any
     // #fragment (the signing context); anything else is returned unchanged, so a
-    // bare contract id and the DIDs naming it all map to the same value.
+    // bare contract id and the DIDs naming it all map to the same value. With
+    // "Xy+3=" standing for a contract id (base64, like every PDO contract id):
+    //   contract_id_of("did:pdo:Xy+3=")        -> "Xy+3="
+    //   contract_id_of("did:pdo:Xy+3=#key-1")  -> "Xy+3="
+    //   contract_id_of("Xy+3=")                -> "Xy+3="
+    //   contract_id_of("did:example:alice")    -> "did:example:alice"
+    // The contracts use it to compare a credential's issuer, a DID, with the
+    // contract id that signed it (proof.verificationMethod.id).
     inline std::string contract_id_of(const std::string& id)
     {
         const std::string prefix(PDO_DID_PREFIX);
@@ -40,7 +47,14 @@ namespace identity
     }
 
     // The DID for an identifier: a bare contract id gains the PDO prefix, an
-    // identifier that already is a DID is returned unchanged.
+    // identifier that already is a DID is returned unchanged:
+    //   did_of("Xy+3=")                -> "did:pdo:Xy+3="
+    //   did_of("did:pdo:Xy+3=")        -> "did:pdo:Xy+3="
+    //   did_of("did:pdo:Xy+3=#key-1")  -> "did:pdo:Xy+3=#key-1"   (the fragment stays)
+    //   did_of("did:example:alice")    -> "did:example:alice"
+    // The rego policy agent uses it so a policy always reads DIDs (the issuer,
+    // signer, subject and holder of what is presented, whichever form they came
+    // in), and to name itself as the issuer of the credentials it issues.
     inline std::string did_of(const std::string& id)
     {
         return id.compare(0, 4, "did:") == 0 ? id : std::string(PDO_DID_PREFIX) + id;
