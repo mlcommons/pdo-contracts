@@ -1,4 +1,4 @@
-# REGO_GRAPH_VALIDATOR: the trusted check set_policy_graph runs over a policy graph and the
+# REGO_GRAPH_VALIDATOR: the trusted check set_rego_policy runs over a policy graph and the
 # interfaces of its components before anything is stored. The contract embeds this source.
 #   input : { "graph": <policy graph>, "interfaces": { <component id>: <interface> } }
 #   output (data.validate.result): every problem, sorted; an empty list means the graph is valid

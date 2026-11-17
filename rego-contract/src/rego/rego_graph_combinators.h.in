@@ -15,9 +15,10 @@
 
 #pragma once
 
-// The graph combinators: trusted Rego, like the two in rego_combinators.h. CMake
-// generates this header from src/rego/graph_validator.rego and graph_planner.rego. A checker
-// that must decide as the contract does (policy_fabric's card tests) reads those two files.
+// The graph combinators: the trusted Rego that validates a policy graph and plans each
+// request over it. CMake generates this header from src/rego/graph_validator.rego and
+// graph_planner.rego. A checker that must decide as the contract does (policy_fabric's card
+// tests) reads those two files.
 
 static const char REGO_GRAPH_VALIDATOR[] = R"REGO(@REGO_GRAPH_VALIDATOR@)REGO";
 

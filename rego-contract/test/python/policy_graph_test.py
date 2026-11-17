@@ -166,7 +166,7 @@ graph["trusted_issuers"] = {t: [dids[d] for d in listed] for t, listed in GRAPH[
 for node_id, node in graph["nodes"].items():
     node["policy_data"] = renamed(SUITE["policy_data"][node_id])
 REQUEST = renamed(SUITE["request"])
-policy_agent.set_policy_graph(
+policy_agent.set_rego_policy(
     state, agent, OWNER, graph=write_json("policy_graph.json", graph), components=COMPONENTS
 )
 

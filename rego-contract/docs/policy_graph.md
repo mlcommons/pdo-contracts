@@ -1,14 +1,8 @@
 # Policy graphs
 
-A `rego_policy_agent` holds one of two kinds of policy, set once:
-
-- **flat**, by `set_rego_policy`: subpolicies that all read the same input, combined by
-  the results combinator (see the family README);
-- **graph**, by `set_policy_graph`: Rego components that pass credentials to each other.
-  The root component issues the capability, and the agent signs it as a
-  `policy_decision`, as for a flat asset policy.
-
-This page is the spec of graph mode.
+A `rego_policy_agent`'s policy is a graph of Rego components that pass credentials to each
+other, set once by `set_rego_policy`. The root component issues the capability, and the
+agent signs it as a `policy_decision`. This page is the spec.
 
 ## Terms
 
@@ -111,13 +105,12 @@ presented input needs its own type; a node input needs what its producer needs;
 `accept_presented` adds the alternative of presenting the credential itself; a node needs one
 alternative of each of its inputs. Alternatives that include another are dropped, and a graph
 whose expansion holds more than 64 at any step is refused, even if fewer remain at the end.
-`get_requirement_alternatives` returns them smallest first, and `get_requirements` returns the
-first.
+`get_requirements` returns them, smallest first.
 
 ## Evaluation (`issue_policy_credential`)
 
-1. View the presented credentials as for a flat policy, `{type, issuer, signer, trusted,
-   subject, claims, index, proof_value}`. The presentations may leave out a role only some
+1. View the presented credentials as `{type, issuer, signer, trusted, subject, claims, index,
+   proof_value}`, numbered role by role. The presentations may leave out a role only some
    alternatives read, but not name a role that no alternative reads ("the presentations name a
    role the policy does not read").
 2. Plan (`src/rego/graph_planner.rego`). A presented input takes the credentials of its
@@ -154,35 +147,34 @@ A denial fails `issue_policy_credential` with "policy evaluation denied, " and o
 
 `explain_policy_decision` reports the same reasons without the prefix (and "missing inputs"
 for the first). These are errors, not denials, and say the policy or the call is wrong:
-"invalid request, no policy data object for node N" (a node's policy data was removed with
-`set_policy_data`), "unexpected error, node N returned an ill-formed output", and any problem
-the validator finds when the graph is set.
+"unexpected error, node N returned an ill-formed output", and any problem the validator finds
+when the policy is set.
 
 ## Methods
 
 | Method | Parameters | Returns | Caller |
 | --- | --- | --- | --- |
-| `set_policy_graph` | `{policy_graph, components: [[id, source]]}` | `true` | owner, once |
-| `get_policy_graph` | none | `{policy_graph, components, sha256}` | anyone; graph only |
-| `get_requirement_alternatives` | none | `{default, alternatives}`; a flat policy has one | anyone |
-| `set_node_policy_data` | `{node, policy_data}` | `true` | owner; graph only |
-| `explain_policy_decision` | as `issue_policy_credential` | `{plan, outputs, decision, reason}` | anyone; graph only |
+| `set_rego_policy` | `{policy_graph, components: [[id, source]]}` | `true` | owner, once |
+| `get_rego_policy` | none | `{policy_graph, components, sha256}` | anyone |
+| `get_requirements` | none | the alternatives, `[{role: [type]}]`, smallest first | anyone |
+| `set_policy_data` | `{node, policy_data}` | `true` | owner |
+| `get_policy_data` | none | `{node: policy_data}` | anyone |
+| `issue_policy_credential` | `{presentation: {role: <verifiable presentation>}, request}` | the signed `policy_decision` | anyone |
+| `explain_policy_decision` | as `issue_policy_credential` | `{plan, outputs, decision, reason}` | anyone |
 
-A method marked "graph only" fails on a flat policy with "the policy is not a graph";
-`set_node_policy_data` also refuses a node the graph does not have. On a graph policy,
-`get_rego_policy` fails with "no rego policy has been set". `set_policy_graph` and
-`set_rego_policy` each refuse an agent whose policy is already set, of either kind.
+The trusted-issuer methods (`register_trusted_issuer`, `unregister_trusted_issuer`, owner;
+`list_trusted_issuers`, anyone) are the identity family's `policy_agent`'s.
 
-`set_policy_graph` keeps each node's `policy_data` as that node's policy data
+Until the policy is set, every policy method fails with "no rego policy has been set";
+`set_rego_policy` refuses an agent whose policy is set, and `set_policy_data` a node the graph
+does not have. `set_rego_policy` keeps each node's `policy_data` as that node's policy data
 (`get_policy_data` returns them keyed by node) and stores the graph with every node's
-`policy_data` emptied. The identity family's `set_policy_data` still replaces the whole
-`{node: data}` map at once; prefer `set_node_policy_data`, since a node left out of the map
-makes every later evaluation an error.
+`policy_data` emptied.
 
-`get_policy_graph`'s `sha256` is the base64 SHA-256 of the contract's serialization of
+`get_rego_policy`'s `sha256` is the base64 SHA-256 of the contract's serialization of
 `{policy_graph, components}`, the stored graph and the component sources. It does not cover
 policy data, which the owner may change, and the `policy_decision` the agent issues does not
-carry it; since the graph is set once, it identifies the composition behind every decision the
+carry it; since the policy is set once, it identifies the composition behind every decision the
 agent signs.
 
 ## Limits
@@ -193,23 +185,26 @@ has no time source, so there is no per-component time limit.
 
 ## Commands
 
-The family's `rego_policy_agent` plugin adds, beside the flat policy's commands:
+The family's `rego_policy_agent` command (also a `pdo-shell` plugin) has:
 
 | Command | Arguments | Does |
 | --- | --- | --- |
-| `set_policy_graph` | `--graph FILE --components DIR` | sends the graph and the source of each component its nodes use |
-| `get_policy_graph` | | prints `{policy_graph, components, sha256}` |
-| `get_requirement_alternatives` | | prints `{default, alternatives}` |
-| `set_node_policy_data` | `--node ID --data FILE` | replaces one node's policy data |
+| `set_rego_policy` | `--graph FILE --components DIR` | sends the graph and the source of each component its nodes use, read from `DIR/<id>/component.rego` |
+| `get_rego_policy` | | prints `{policy_graph, components, sha256}` |
+| `get_requirements` | | prints the alternatives |
+| `set_policy_data` | `--node ID --data FILE` | replaces one node's policy data |
+| `get_policy` | `[--file FILE]` | prints every node's policy data |
 | `explain` | `--presentation FILE --request JSON` | runs `explain_policy_decision` |
+| `issue_credential` | `--presentation FILE --request JSON --issued-credential FILE` | issues the decision |
+| `register`, `unregister`, `list_issuers` | | the trusted issuers, as for the identity family's policy agent |
 
-`issue_credential --presentation FILE --request JSON --issued-credential FILE` issues the
-decision for either kind of policy. `test/script_test.sh` runs them all against a ledger.
+`test/script_test.sh` runs them against a ledger.
 
 ## Tests
 
 | Test | Needs | Runs |
 | --- | --- | --- |
 | `test/graph_test.sh` | `opa`, python3 with the regorus bindings (`test/README.md`) | the combinators' tests, on OPA and on regorus |
-| `test/script_test.sh` | a ledger, services and a guardian (`make test`, `TEST_LIST=^system-rego-script`) | the CLI, for a flat and a graph policy |
+| `test/script_test.sh` | a ledger and services (`make test`, `TEST_LIST=^system-rego-script`); it starts its own guardian | the CLI flow, through the token and a guardian |
+| `test/python/stateless_test.py` | a ledger, services and a guardian (see `test/python/README.md`) | the same flow through the Python API |
 | `test/python/policy_graph_test.py GRAPH COMPONENTS VECTORS` | a ledger and services (see `test/python/README.md`) | a graph's vectors, decided on-chain |

@@ -37,10 +37,6 @@ __all__ = [
     "op_set_policy_data",
     "op_get_policy_data",
     "op_issue_policy_credential",
-    "op_set_policy_graph",
-    "op_get_policy_graph",
-    "op_get_requirement_alternatives",
-    "op_set_node_policy_data",
     "op_explain_policy_decision",
     "cmd_create_rego_policy_agent",
     "cmd_set_rego_policy",
@@ -52,10 +48,6 @@ __all__ = [
     "cmd_set_policy_data",
     "cmd_get_policy_data",
     "cmd_issue_policy_credential",
-    "cmd_set_policy_graph",
-    "cmd_get_policy_graph",
-    "cmd_get_requirement_alternatives",
-    "cmd_set_node_policy_data",
     "cmd_explain_policy_decision",
     "do_rego_policy_agent",
     "do_rego_policy_agent_contract",
@@ -65,86 +57,34 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 # -----------------------------------------------------------------
-# Inherited from the policy_agent plugin -- the initialize, trusted-issuer, and
-# policy-data methods are identical here (this contract reuses those C++
-# methods). initialize just marks the contract ready; the Rego modules are set
+# Inherited from the policy_agent plugin -- the initialize, trusted-issuer,
+# get_policy_data and get_requirements operations send the same method names and
+# parameters here. initialize just marks the contract ready; the policy is set
 # separately by set_rego_policy.
 # -----------------------------------------------------------------
 op_initialize = policy_agent_plugin.op_initialize
 op_register_trusted_issuer = policy_agent_plugin.op_register_trusted_issuer
 op_unregister_trusted_issuer = policy_agent_plugin.op_unregister_trusted_issuer
 op_list_trusted_issuers = policy_agent_plugin.op_list_trusted_issuers
-op_set_policy_data = policy_agent_plugin.op_set_policy_data
 op_get_policy_data = policy_agent_plugin.op_get_policy_data
 op_get_requirements = policy_agent_plugin.op_get_requirements
 
 cmd_register_trusted_issuer = policy_agent_plugin.cmd_register_trusted_issuer
 cmd_unregister_trusted_issuer = policy_agent_plugin.cmd_unregister_trusted_issuer
 cmd_list_trusted_issuers = policy_agent_plugin.cmd_list_trusted_issuers
-cmd_set_policy_data = policy_agent_plugin.cmd_set_policy_data
 cmd_get_policy_data = policy_agent_plugin.cmd_get_policy_data
 cmd_get_requirements = policy_agent_plugin.cmd_get_requirements
 cmd_create_rego_policy_agent = policy_agent_plugin.cmd_create_policy_agent
 
 
 # -----------------------------------------------------------------
-# op_set_rego_policy
-#   Set the Rego policy, once: a list of [subpolicy_id, source] pairs. The
-#   contract derives and stores the per-role requirements, input schema and
-#   type of credential issued from the subpolicies.
-# -----------------------------------------------------------------
-class op_set_rego_policy(pcontract.contract_op_base):
-    name = "set_rego_policy"
-    help = "set the Rego policy, once (a list of [subpolicy_id, source] pairs)"
-
-    @classmethod
-    def add_arguments(cls, subparser):
-        subparser.add_argument(
-            "--rego-modules",
-            help="list of [subpolicy_id, source] pairs, as JSON",
-            type=pbuilder.invocation_parameter,
-            required=True,
-        )
-
-    @classmethod
-    def invoke(cls, state, session_params, rego_modules, **kwargs):
-        session_params["commit"] = True
-        message = invocation_request("set_rego_policy", rego_modules=rego_modules)
-        result = pcontract_cmd.send_to_contract(state, message, **session_params)
-        cls.log_invocation(message, result)
-        return result
-
-
-# -----------------------------------------------------------------
-# op_get_rego_policy
-#   Fetch the policy: the credential type, the whole list of [subpolicy_id,
-#   source] pairs and the merged requirements.
-# -----------------------------------------------------------------
-class op_get_rego_policy(pcontract.contract_op_base):
-    name = "get_rego_policy"
-    help = "fetch the credential type, [subpolicy_id, source] pairs and requirements"
-
-    @classmethod
-    def add_arguments(cls, subparser):
-        pass
-
-    @classmethod
-    def invoke(cls, state, session_params, **kwargs):
-        session_params["commit"] = False
-        message = invocation_request("get_rego_policy")
-        result = pcontract_cmd.send_to_contract(state, message, **session_params)
-        cls.log_invocation(message, result)
-        return result
-
-
-# -----------------------------------------------------------------
 # op_issue_policy_credential
 #   Judge the role-keyed presentations, with the values the requester declares,
-#   and issue the credential the policy describes.
+#   and sign the policy's decision.
 # -----------------------------------------------------------------
 class op_issue_policy_credential(pcontract.contract_op_base):
     name = "issue_policy_credential"
-    help = "judge the presentations and issue the credential the policy describes"
+    help = "judge the presentations and sign the policy's decision"
 
     @classmethod
     def add_arguments(cls, subparser):
@@ -158,7 +98,7 @@ class op_issue_policy_credential(pcontract.contract_op_base):
         subparser.add_argument(
             "-r",
             "--request",
-            help="values the requester declares, e.g. the project (JSON)",
+            help="values the requester declares, e.g. the channel key (JSON)",
             type=pbuilder.invocation_parameter,
             required=True,
         )
@@ -175,12 +115,12 @@ class op_issue_policy_credential(pcontract.contract_op_base):
 
 
 # -----------------------------------------------------------------
-# op_set_policy_graph
-#   Set the policy as a graph of components, once, instead of set_rego_policy.
+# op_set_rego_policy
+#   Set the policy, a graph of components, once.
 # -----------------------------------------------------------------
-class op_set_policy_graph(pcontract.contract_op_base):
-    name = "set_policy_graph"
-    help = "set the policy as a graph of components, once"
+class op_set_rego_policy(pcontract.contract_op_base):
+    name = "set_rego_policy"
+    help = "set the policy, a graph of components, once"
 
     @classmethod
     def add_arguments(cls, subparser):
@@ -200,18 +140,18 @@ class op_set_policy_graph(pcontract.contract_op_base):
     @classmethod
     def invoke(cls, state, session_params, policy_graph, components, **kwargs):
         session_params["commit"] = True
-        message = invocation_request("set_policy_graph", policy_graph=policy_graph, components=components)
+        message = invocation_request("set_rego_policy", policy_graph=policy_graph, components=components)
         result = pcontract_cmd.send_to_contract(state, message, **session_params)
         cls.log_invocation(message, result)
         return result
 
 
 # -----------------------------------------------------------------
-# op_get_policy_graph
+# op_get_rego_policy
 #   Fetch the policy graph, its components and the hash of both.
 # -----------------------------------------------------------------
-class op_get_policy_graph(pcontract.contract_op_base):
-    name = "get_policy_graph"
+class op_get_rego_policy(pcontract.contract_op_base):
+    name = "get_rego_policy"
     help = "fetch the policy graph, its components and their hash"
 
     @classmethod
@@ -221,40 +161,19 @@ class op_get_policy_graph(pcontract.contract_op_base):
     @classmethod
     def invoke(cls, state, session_params, **kwargs):
         session_params["commit"] = False
-        message = invocation_request("get_policy_graph")
+        message = invocation_request("get_rego_policy")
         result = pcontract_cmd.send_to_contract(state, message, **session_params)
         cls.log_invocation(message, result)
         return result
 
 
 # -----------------------------------------------------------------
-# op_get_requirement_alternatives
-#   Fetch every bundle of credential types that can satisfy the policy.
-# -----------------------------------------------------------------
-class op_get_requirement_alternatives(pcontract.contract_op_base):
-    name = "get_requirement_alternatives"
-    help = "fetch the bundles of credential types that satisfy the policy, smallest first"
-
-    @classmethod
-    def add_arguments(cls, subparser):
-        pass
-
-    @classmethod
-    def invoke(cls, state, session_params, **kwargs):
-        session_params["commit"] = False
-        message = invocation_request("get_requirement_alternatives")
-        result = pcontract_cmd.send_to_contract(state, message, **session_params)
-        cls.log_invocation(message, result)
-        return result
-
-
-# -----------------------------------------------------------------
-# op_set_node_policy_data
+# op_set_policy_data
 #   Replace one node's policy data.
 # -----------------------------------------------------------------
-class op_set_node_policy_data(pcontract.contract_op_base):
-    name = "set_node_policy_data"
-    help = "replace the policy data of one node of a graph policy"
+class op_set_policy_data(pcontract.contract_op_base):
+    name = "set_policy_data"
+    help = "replace the policy data of one node of the policy"
 
     @classmethod
     def add_arguments(cls, subparser):
@@ -269,7 +188,7 @@ class op_set_node_policy_data(pcontract.contract_op_base):
     @classmethod
     def invoke(cls, state, session_params, node, policy_data, **kwargs):
         session_params["commit"] = True
-        message = invocation_request("set_node_policy_data", node=node, policy_data=policy_data)
+        message = invocation_request("set_policy_data", node=node, policy_data=policy_data)
         result = pcontract_cmd.send_to_contract(state, message, **session_params)
         cls.log_invocation(message, result)
         return result
@@ -277,11 +196,11 @@ class op_set_node_policy_data(pcontract.contract_op_base):
 
 # -----------------------------------------------------------------
 # op_explain_policy_decision
-#   Plan and run a graph policy over the presentations; nothing is verified or signed.
+#   Plan and run the policy over the presentations; nothing is verified or signed.
 # -----------------------------------------------------------------
 class op_explain_policy_decision(pcontract.contract_op_base):
     name = "explain_policy_decision"
-    help = "plan and run a graph policy over the presentations, without verifying or signing"
+    help = "plan and run the policy over the presentations, without verifying or signing"
 
     @classmethod
     def add_arguments(cls, subparser):
@@ -312,79 +231,6 @@ class op_explain_policy_decision(pcontract.contract_op_base):
 
 
 # -----------------------------------------------------------------
-# cmd_set_rego_policy
-# -----------------------------------------------------------------
-class cmd_set_rego_policy(pcommand.contract_command_base):
-    # distinct from the inherited policy_agent "set_policy" (which sets policy DATA)
-    name = "set_rego_policy"
-    help = "set the Rego policy, once (a list of [subpolicy_id, source] pairs)"
-
-    @classmethod
-    def add_arguments(cls, subparser):
-        subparser.add_argument(
-            "--module",
-            help="a subpolicy id and the path to its Rego source file (repeatable)",
-            nargs=2,
-            action="append",
-            metavar=("SUBPOLICY_ID", "FILE"),
-            required=True,
-        )
-
-    @classmethod
-    def invoke(cls, state, context, module, **kwargs):
-        save_file = pcontract_cmd.get_contract_from_context(state, context)
-        if not save_file:
-            raise ValueError(
-                "rego policy agent contract must be created and initialized"
-            )
-
-        rego_modules = []
-        for subpolicy_id, path in module:
-            with open(path, "r") as fp:
-                rego_modules.append([subpolicy_id, fp.read()])
-
-        session = pbuilder.SessionParameters(save_file=save_file)
-        result = pcontract.invoke_contract_op(
-            op_set_rego_policy,
-            state,
-            context,
-            session,
-            rego_modules=rego_modules,
-            **kwargs,
-        )
-        cls.display(result)
-        return result
-
-
-# -----------------------------------------------------------------
-# cmd_get_rego_policy
-# -----------------------------------------------------------------
-class cmd_get_rego_policy(pcommand.contract_command_base):
-    # distinct from the inherited policy_agent "get_policy" (which gets policy DATA)
-    name = "get_rego_policy"
-    help = "fetch the credential type, [subpolicy_id, source] pairs and requirements"
-
-    @classmethod
-    def add_arguments(cls, subparser):
-        pass
-
-    @classmethod
-    def invoke(cls, state, context, **kwargs):
-        save_file = pcontract_cmd.get_contract_from_context(state, context)
-        if not save_file:
-            raise ValueError(
-                "rego policy agent contract must be created and initialized"
-            )
-
-        session = pbuilder.SessionParameters(save_file=save_file)
-        result = pcontract.invoke_contract_op(
-            op_get_rego_policy, state, context, session, **kwargs
-        )
-        cls.display(result)
-        return result
-
-
-# -----------------------------------------------------------------
 # cmd_issue_policy_credential
 #   The inherited policy_agent command, with the values the requester declares.
 # -----------------------------------------------------------------
@@ -402,7 +248,7 @@ class cmd_issue_policy_credential(pcommand.contract_command_base):
         )
         subparser.add_argument(
             "--request",
-            help="values the requester declares, e.g. the project (JSON)",
+            help="values the requester declares, e.g. the channel key (JSON)",
             type=pbuilder.invocation_parameter,
             required=True,
         )
@@ -450,13 +296,13 @@ def _agent_session(state, context):
 
 
 # -----------------------------------------------------------------
-# cmd_set_policy_graph
+# cmd_set_rego_policy
 #   Reads a graph and, from a folder of <component_id>/component.rego, the components
 #   its nodes use.
 # -----------------------------------------------------------------
-class cmd_set_policy_graph(pcommand.contract_command_base):
-    name = "set_policy_graph"
-    help = "set the policy as a graph of components, once"
+class cmd_set_rego_policy(pcommand.contract_command_base):
+    name = "set_rego_policy"
+    help = "set the policy, a graph of components, once"
 
     @classmethod
     def add_arguments(cls, subparser):
@@ -479,7 +325,7 @@ class cmd_set_policy_graph(pcommand.contract_command_base):
                 sources.append([component_id, fp.read()])
 
         result = pcontract.invoke_contract_op(
-            op_set_policy_graph,
+            op_set_rego_policy,
             state,
             context,
             _agent_session(state, context),
@@ -492,10 +338,10 @@ class cmd_set_policy_graph(pcommand.contract_command_base):
 
 
 # -----------------------------------------------------------------
-# cmd_get_policy_graph
+# cmd_get_rego_policy
 # -----------------------------------------------------------------
-class cmd_get_policy_graph(pcommand.contract_command_base):
-    name = "get_policy_graph"
+class cmd_get_rego_policy(pcommand.contract_command_base):
+    name = "get_rego_policy"
     help = "fetch the policy graph, its components and their hash"
 
     @classmethod
@@ -505,39 +351,18 @@ class cmd_get_policy_graph(pcommand.contract_command_base):
     @classmethod
     def invoke(cls, state, context, **kwargs):
         result = pcontract.invoke_contract_op(
-            op_get_policy_graph, state, context, _agent_session(state, context), **kwargs
+            op_get_rego_policy, state, context, _agent_session(state, context), **kwargs
         )
         cls.display(result)
         return result
 
 
 # -----------------------------------------------------------------
-# cmd_get_requirement_alternatives
+# cmd_set_policy_data
 # -----------------------------------------------------------------
-class cmd_get_requirement_alternatives(pcommand.contract_command_base):
-    name = "get_requirement_alternatives"
-    help = "fetch the bundles of credential types that satisfy the policy, smallest first"
-
-    @classmethod
-    def add_arguments(cls, subparser):
-        pass
-
-    @classmethod
-    def invoke(cls, state, context, **kwargs):
-        result = pcontract.invoke_contract_op(
-            op_get_requirement_alternatives, state, context, _agent_session(state, context), **kwargs
-        )
-        result = json.loads(result)
-        cls.display(result)
-        return result
-
-
-# -----------------------------------------------------------------
-# cmd_set_node_policy_data
-# -----------------------------------------------------------------
-class cmd_set_node_policy_data(pcommand.contract_command_base):
-    name = "set_node_policy_data"
-    help = "replace the policy data of one node of a graph policy"
+class cmd_set_policy_data(pcommand.contract_command_base):
+    name = "set_policy_data"
+    help = "replace the policy data of one node of the policy"
 
     @classmethod
     def add_arguments(cls, subparser):
@@ -551,7 +376,7 @@ class cmd_set_node_policy_data(pcommand.contract_command_base):
         with open(data, "r") as fp:
             policy_data = json.load(fp)
         pcontract.invoke_contract_op(
-            op_set_node_policy_data,
+            op_set_policy_data,
             state,
             context,
             _agent_session(state, context),
@@ -568,7 +393,7 @@ class cmd_set_node_policy_data(pcommand.contract_command_base):
 # -----------------------------------------------------------------
 class cmd_explain_policy_decision(pcommand.contract_command_base):
     name = "explain"
-    help = "plan and run a graph policy over the presentations, without verifying or signing"
+    help = "plan and run the policy over the presentations, without verifying or signing"
 
     @classmethod
     def add_arguments(cls, subparser):
@@ -617,10 +442,6 @@ __operations__ = [
     op_set_policy_data,
     op_get_policy_data,
     op_issue_policy_credential,
-    op_set_policy_graph,
-    op_get_policy_graph,
-    op_get_requirement_alternatives,
-    op_set_node_policy_data,
     op_explain_policy_decision,
 ]
 
@@ -639,10 +460,6 @@ __commands__ = [
     cmd_set_policy_data,
     cmd_get_policy_data,
     cmd_issue_policy_credential,
-    cmd_set_policy_graph,
-    cmd_get_policy_graph,
-    cmd_get_requirement_alternatives,
-    cmd_set_node_policy_data,
     cmd_explain_policy_decision,
 ]
 

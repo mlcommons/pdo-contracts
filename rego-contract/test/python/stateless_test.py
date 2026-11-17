@@ -17,14 +17,14 @@ asset_owner = "user2"
 asset_user = "user3"
 guardian_url = GUARDIAN_URL
 script_dir = os.path.dirname(os.path.abspath(__file__))
-policy_data = os.path.join(script_dir, os.path.pardir, "policy_data.json")
-subpolicy_a_path = os.path.join(
-    script_dir, os.path.pardir, "subpolicies", "subpolicy_a.rego"
-)
-subpolicy_b_path = os.path.join(
-    script_dir, os.path.pardir, "subpolicies", "subpolicy_b.rego"
-)
-# the "membership" credential subpolicy_a checks against the policy data
+# the policy: a graph whose member component checks a "membership" credential against
+# its node's policy data, and whose download component issues the capability for the
+# key the request names
+graph_dir = os.path.join(script_dir, os.path.pardir, "graphs", "download")
+graph_path = os.path.join(graph_dir, "graph.json")
+components_path = os.path.join(graph_dir, "components")
+member_data_path = os.path.join(SCRATCH_DIR, "member_data.json")
+# a Hyperledger membership, which the member node allows
 membership_credential_path = os.path.join(
     script_dir, os.path.pardir, "credential1.json"
 )
@@ -131,20 +131,20 @@ def owner_setup():
     )
     time.sleep(1)
 
-    print("setting rego policy with subpolicy_a and subpolicy_b...")
+    print("setting the rego policy, the graph and its components...")
     policy_agent.set_rego_policy(
         state,
         read_var("rego_policy"),
         asset_owner,
-        module=[
-            ["subpolicy_a", subpolicy_a_path],
-            ["subpolicy_b", subpolicy_b_path],
-        ],
+        graph=graph_path,
+        components=components_path,
     )
 
-    print("setting policy data...")
+    print("setting the member node's policy data...")
+    with open(member_data_path, "w") as fp:
+        json.dump({"allowedInstitutions": ["Hyperledger"]}, fp)
     policy_agent.set_policy_data(
-        state, read_var("rego_policy"), asset_owner, data=policy_data
+        state, read_var("rego_policy"), asset_owner, node="member", data=member_data_path
     )
 
 
@@ -223,9 +223,13 @@ def user_action():
     requirements = policy_agent.get_requirements(
         state, read_var("retrieved_policy_agent"), asset_user
     )
-    # the rego policy agent returns { role: [credential_type, ...], ... };
-    # collect the flat list of credential types needed for the presentation
-    creds_list = sorted({t for types in requirements.values() for t in types})
+    # the rego policy agent returns its requirement alternatives, each
+    # { role: [credential_type, ...], ... }; present the first one the wallet holds
+    held = {"public_key", "membership"}
+    alternative = next(
+        a for a in requirements if all(t in held for types in a.values() for t in types)
+    )
+    creds_list = sorted({t for types in alternative.values() for t in types})
 
     print("generating vp...")
     identity.get_vp(
@@ -244,13 +248,17 @@ def user_action():
     with open(presentation_file, "w") as fp:
         json.dump({"applicant": vp}, fp)
 
+    # the graph's download component takes the key the request names
+    with open(public_key_credential_path, "r") as fp:
+        channel_key = json.load(fp)["credentialSubject"]["claims"]["key"]
+
     print("Get policy decision vc...")
     policy_agent.issue_policy_credential(
         state,
         read_var("retrieved_policy_agent"),
         asset_user,
         presentation=presentation_file,
-        request={},
+        request={"channel_key": channel_key},
         issued_credential=policy_credential_path,
     )
 

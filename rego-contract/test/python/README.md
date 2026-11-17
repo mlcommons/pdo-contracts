@@ -8,9 +8,7 @@ Most similar test to the decentralized setup.
   - generate user keys
   - Activate PDO client environment
   - Run `startup.py`
-  - Run `stateless_test.py`
-  - Run `rego_policy_agent_test.py` (the policy agent as an asset's policy and as a
-    rule-based authority)
+  - Run `stateless_test.py` (a policy graph, through the token and the guardian)
   - Run `policy_graph_test.py ../graphs/download/graph.json ../graphs/download/components
     ../graphs/download/graph_vectors.json` (a graph policy, decided by the graph's vectors)
   - Run `cleanup.py`

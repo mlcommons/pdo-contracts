@@ -1,10 +1,10 @@
 # Tests
 
 - CLI test, against a ledger:
-  - Scripts: `script_test.sh` (a flat and a graph policy, through a guardian) and
+  - Scripts: `script_test.sh` (a policy graph, through a guardian) and
     `script_test_rego.sh` (the stateless evaluator).
   - How to run:
-    - Run the ledger and the services containers, and a guardian.
+    - Run the ledger and the services containers; `script_test.sh` starts its own guardian.
     - Copy the ledger's root cert and the services' site.toml to the correct locations.
     - Run `TEST_LIST=^system-rego-script make -C ${PDO_CONTRACTS_ROOT} test`
       (`^system-rego-rego_script` for the evaluator).

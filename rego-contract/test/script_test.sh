@@ -17,14 +17,15 @@
 # -----------------------------------------------------------------
 # End-to-end CLI test for the rego_policy_agent + rego_token flow.
 #
-# It exercises a two-subpolicy policy end to end:
-#   - subpolicy_a is an attribute gate: it requires a "membership" credential
-#     whose institution is on the data owner's allow list (policy data).
-#   - subpolicy_b supplies the download: it requires a "public_key" credential
-#     carrying the requester's channel key, and describes the policy_decision.
-# The rego_policy_agent merges their results and issues a signed "policy_decision"
-# credential whose claims are the operation subpolicy_b described; the rego_token
-# turns that credential into a guardian capability that returns the encrypted data.
+# It exercises a policy graph of two components (graphs/download) end to end:
+#   - member is an attribute gate: it takes a "membership" credential whose
+#     institution is on the data owner's allow list (the node's policy data),
+#     and outputs a "membership_grant", which may also be presented instead;
+#   - download is the root: it takes the grant and a "public_key" credential
+#     carrying the channel key the request names, and issues the capability.
+# The rego_policy_agent runs them and signs a "policy_decision" credential whose
+# claims are the capability's operation; the rego_token turns that credential into
+# a guardian capability that returns the encrypted data.
 # -----------------------------------------------------------------
 : "${PDO_LEDGER_URL?Missing environment variable PDO_LEDGER_URL}"
 : "${PDO_HOME?Missing environment variable PDO_HOME}"
@@ -212,24 +213,13 @@ try pdo-context load ${OPTS} --import-file ${F_CONTEXT_TEMPLATES}/tokens.toml \
 try pdo-context load ${OPTS} --import-file ${F_IDENTITY_TEMPLATES}/identity.toml \
     --bind identity downloader --bind user user5
 
-try pdo-context load ${OPTS} --import-file ${F_CONTEXT_TEMPLATES}/rego_policy_agent.toml \
-    --bind identity rego_graph --bind user user4
-
-try pdo-context load ${OPTS} --import-file ${F_CONTEXT_TEMPLATES}/tokens.toml \
-    --bind token test2 --bind user user4 --bind url http://${F_GUARDIAN_HOST}:7900
-
 
 # -----------------------------------------------------------------
-# Test data: the two subpolicies and the data owner's allow list
-#   subpolicy_a -- role "applicant" -> "membership" (checked against policy data)
-#   subpolicy_b -- role "applicant" -> "public_key" (carries the channel key)
+# Test data: the policy graph, whose member node allows Hyperledger and Intel, and
+# a Hyperledger membership; both components read role "applicant"
 # -----------------------------------------------------------------
-F_SUBPOLICY_A=${SCRIPTDIR}/subpolicies/subpolicy_a.rego
-F_SUBPOLICY_B=${SCRIPTDIR}/subpolicies/subpolicy_b.rego
-F_POLICY_DATA=${SCRIPTDIR}/policy_data.json
-F_MEMBERSHIP_CREDENTIAL=${SCRIPTDIR}/credential1.json
-# the same download as a graph of two components, for the graph mode tests
 F_GRAPH_DIR=${SCRIPTDIR}/graphs/download
+F_MEMBERSHIP_CREDENTIAL=${SCRIPTDIR}/credential1.json
 
 # -----------------------------------------------------------------
 # start the tests
@@ -267,24 +257,25 @@ yell register the membership authority as a trusted issuer for type membership
 try rego_policy_agent register ${OPTS} --contract identity.rego_download.rego_policy_agent \
     --issuer identity.membership_authority.signature_authority --path membership --credential-types membership
 
-yell set the rego policy with subpolicy_a and subpolicy_b
+yell set the rego policy, the graph and its components
 try rego_policy_agent set_rego_policy ${OPTS} --contract identity.rego_download.rego_policy_agent \
-    --module subpolicy_a ${F_SUBPOLICY_A} \
-    --module subpolicy_b ${F_SUBPOLICY_B}
+    --graph ${F_GRAPH_DIR}/graph.json --components ${F_GRAPH_DIR}/components
 
-yell set the policy data with the allowed institutions
-try rego_policy_agent set_policy ${OPTS} --contract identity.rego_download.rego_policy_agent \
-    --data ${F_POLICY_DATA}
+yell a policy is set once, so a second one is refused
+if rego_policy_agent set_rego_policy ${OPTS} --contract identity.rego_download.rego_policy_agent \
+       --graph ${F_GRAPH_DIR}/graph.json --components ${F_GRAPH_DIR}/components ; then
+    die "set_rego_policy succeeded on an agent whose policy is set"
+fi
 
 yell fetch the stored rego policy
 try rego_policy_agent get_rego_policy ${OPTS} --contract identity.rego_download.rego_policy_agent
 
-yell fetch the merged requirements, expect role applicant with membership and public_key
+yell fetch the requirements, expect an alternative of role applicant with membership_grant and public_key
 F_REQUIREMENTS=$(rego_policy_agent get_requirements ${OPTS} \
     --contract identity.rego_download.rego_policy_agent)
-say "merged requirements: ${F_REQUIREMENTS}"
-if [[ "${F_REQUIREMENTS}" != *"applicant"* || "${F_REQUIREMENTS}" != *"membership"* || "${F_REQUIREMENTS}" != *"public_key"* ]] ; then
-    die "expected merged requirements to contain role applicant with membership and public_key, got: ${F_REQUIREMENTS}"
+say "requirements: ${F_REQUIREMENTS}"
+if [[ "${F_REQUIREMENTS}" != *"applicant"* || "${F_REQUIREMENTS}" != *"membership_grant"* || "${F_REQUIREMENTS}" != *"public_key"* ]] ; then
+    die "expected an alternative of role applicant with membership_grant and public_key, got: ${F_REQUIREMENTS}"
 fi
 
 
@@ -344,9 +335,16 @@ try id_wallet get_vp ${OPTS} --contract identity.downloader.wallet \
 # wrap the presentation under the required role: { "applicant": <VP> }
 echo "{\"applicant\": $(cat ${TEST_ROOT}/vp.json)}" > ${TEST_ROOT}/presentation.json
 
-yell issue a policy decision credential
+# the graph's download component takes the key the request names
+F_REQUEST=$(python3 -c 'import json,sys; print(json.dumps({"channel_key": json.load(open(sys.argv[1]))["credentialSubject"]["claims"]["key"]}))' \
+    ${TEST_ROOT}/user_channel_key/credential_key.json)
+
+yell explain the decision, then issue it from the same presentation
+try rego_policy_agent explain ${OPTS} --contract identity.rego_download.rego_policy_agent \
+    --presentation ${TEST_ROOT}/presentation.json --request "${F_REQUEST}"
 try rego_policy_agent issue_credential ${OPTS} --contract identity.rego_download.rego_policy_agent \
-    --presentation ${TEST_ROOT}/presentation.json --request '{}' --issued-credential ${TEST_ROOT}/policy_vc.json
+    --presentation ${TEST_ROOT}/presentation.json --request "${F_REQUEST}" \
+    --issued-credential ${TEST_ROOT}/policy_vc.json
 
 yell download data
 try rego_token do_operation ${OPTS}  --contract token.test1.token_object.token_1 \
@@ -361,75 +359,40 @@ python3 ${SCRIPTDIR}/python/read_data.py ${TEST_ROOT}/encrypted_data.bin \
 cat ${TEST_ROOT}/decrypted_data.txt
 echo
 
-########### graph mode: the same download as a graph of two components
-yell create a graph policy agent that trusts the same authorities
-try rego_policy_agent create ${OPTS} --contract identity.rego_graph.rego_policy_agent \
-    -d 'rego graph policy agent: the download as a graph of two components.'
-try rego_policy_agent register ${OPTS} --contract identity.rego_graph.rego_policy_agent \
-    --issuer identity.public_key_authority.signature_authority --path public_key --credential-types public_key
-try rego_policy_agent register ${OPTS} --contract identity.rego_graph.rego_policy_agent \
-    --issuer identity.membership_authority.signature_authority --path membership --credential-types membership
-
-yell set the policy graph
-try rego_policy_agent set_policy_graph ${OPTS} --contract identity.rego_graph.rego_policy_agent \
-    --graph ${F_GRAPH_DIR}/graph.json --components ${F_GRAPH_DIR}/components
-
-yell a policy is set once, so rego modules are refused on the graph agent
-if rego_policy_agent set_rego_policy ${OPTS} --contract identity.rego_graph.rego_policy_agent \
-       --module subpolicy_a ${F_SUBPOLICY_A} --module subpolicy_b ${F_SUBPOLICY_B} ; then
-    die "set_rego_policy succeeded on a graph policy agent"
-fi
-
-yell fetch the policy graph and the requirement alternatives
-try rego_policy_agent get_policy_graph ${OPTS} --contract identity.rego_graph.rego_policy_agent
-F_ALTERNATIVES=$(rego_policy_agent get_requirement_alternatives ${OPTS} \
-    --contract identity.rego_graph.rego_policy_agent)
-say "requirement alternatives: ${F_ALTERNATIVES}"
-if [[ "${F_ALTERNATIVES}" != *"membership_grant"* || "${F_ALTERNATIVES}" != *"public_key"* ]] ; then
-    die "expected an alternative with membership_grant and public_key, got: ${F_ALTERNATIVES}"
-fi
-
-yell create a token that trusts the graph policy agent
-try ex_token_issuer create ${OPTS} --contract token.test2.token_issuer
-try rego_token mint_tokens ${OPTS} --contract token.test2.token_object
-try rego_token register ${OPTS}  --contract token.test2.token_object.token_1 \
-    --issuer identity.rego_graph.rego_policy_agent --path __ISSUER__ --credential-types policy_decision
-
-# the graph's download component takes the key the request names
-F_GRAPH_REQUEST=$(python3 -c 'import json,sys; print(json.dumps({"channel_key": json.load(open(sys.argv[1]))["credentialSubject"]["claims"]["key"]}))' \
-    ${TEST_ROOT}/user_channel_key/credential_key.json)
-
-yell explain the decision, then issue it from the same presentation
-try rego_policy_agent explain ${OPTS} --contract identity.rego_graph.rego_policy_agent \
-    --presentation ${TEST_ROOT}/presentation.json --request "${F_GRAPH_REQUEST}"
-try rego_policy_agent issue_credential ${OPTS} --contract identity.rego_graph.rego_policy_agent \
-    --presentation ${TEST_ROOT}/presentation.json --request "${F_GRAPH_REQUEST}" \
-    --issued-credential ${TEST_ROOT}/graph_policy_vc.json
-
-yell download data with the decision of the graph
-try rego_token do_operation ${OPTS}  --contract token.test2.token_object.token_1 \
-    --vc-file ${TEST_ROOT}/graph_policy_vc.json \
-    --output-file ${TEST_ROOT}/graph_encrypted_data.bin
-python3 ${SCRIPTDIR}/python/read_data.py ${TEST_ROOT}/graph_encrypted_data.bin \
-    ${TEST_ROOT}/user_channel_key/private_key.pem ${TEST_ROOT}/graph_decrypted_data.txt
-cat ${TEST_ROOT}/graph_decrypted_data.txt
-echo
-
 yell a key other than the presented one is denied
-if rego_policy_agent issue_credential ${OPTS} --contract identity.rego_graph.rego_policy_agent \
+if rego_policy_agent issue_credential ${OPTS} --contract identity.rego_download.rego_policy_agent \
        --presentation ${TEST_ROOT}/presentation.json --request '{"channel_key": "another key"}' \
-       --issued-credential ${TEST_ROOT}/graph_denied_vc.json ; then
-    die "the graph allowed a key that was not presented"
+       --issued-credential ${TEST_ROOT}/denied_vc.json ; then
+    die "the policy allowed a key that was not presented"
 fi
 
 yell once the member node allows only Intel, the Hyperledger membership is denied
 echo '{"allowedInstitutions": ["Intel"]}' > ${TEST_ROOT}/member_data.json
-try rego_policy_agent set_node_policy_data ${OPTS} --contract identity.rego_graph.rego_policy_agent \
+try rego_policy_agent set_policy_data ${OPTS} --contract identity.rego_download.rego_policy_agent \
     --node member --data ${TEST_ROOT}/member_data.json
-if rego_policy_agent issue_credential ${OPTS} --contract identity.rego_graph.rego_policy_agent \
-       --presentation ${TEST_ROOT}/presentation.json --request "${F_GRAPH_REQUEST}" \
-       --issued-credential ${TEST_ROOT}/graph_denied_vc.json ; then
-    die "the graph allowed an institution its policy data no longer allows"
+if rego_policy_agent issue_credential ${OPTS} --contract identity.rego_download.rego_policy_agent \
+       --presentation ${TEST_ROOT}/presentation.json --request "${F_REQUEST}" \
+       --issued-credential ${TEST_ROOT}/denied_vc.json ; then
+    die "the policy allowed an institution its policy data no longer allows"
+fi
+
+yell once Hyperledger is allowed again, the decision is issued again
+echo '{"allowedInstitutions": ["Hyperledger"]}' > ${TEST_ROOT}/member_data.json
+try rego_policy_agent set_policy_data ${OPTS} --contract identity.rego_download.rego_policy_agent \
+    --node member --data ${TEST_ROOT}/member_data.json
+try rego_policy_agent issue_credential ${OPTS} --contract identity.rego_download.rego_policy_agent \
+    --presentation ${TEST_ROOT}/presentation.json --request "${F_REQUEST}" \
+    --issued-credential ${TEST_ROOT}/policy_vc_again.json
+
+yell once the agent no longer trusts the membership authority, the membership is denied
+F_MEMBERSHIP_AUTHORITY=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["proof"]["verificationMethod"]["id"])' \
+    ${TEST_ROOT}/membership_vc.json)
+try rego_policy_agent unregister ${OPTS} --contract identity.rego_download.rego_policy_agent \
+    --issuer ${F_MEMBERSHIP_AUTHORITY} --credential-types membership
+if rego_policy_agent issue_credential ${OPTS} --contract identity.rego_download.rego_policy_agent \
+       --presentation ${TEST_ROOT}/presentation.json --request "${F_REQUEST}" \
+       --issued-credential ${TEST_ROOT}/denied_vc.json ; then
+    die "the policy allowed a membership from an authority it no longer trusts"
 fi
 
 ########### other tests

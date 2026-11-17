@@ -9,10 +9,6 @@ from pdo.rego.plugins.rego_policy_agent import (
     cmd_get_requirements,
     cmd_set_rego_policy,
     cmd_get_rego_policy,
-    cmd_set_policy_graph,
-    cmd_get_policy_graph,
-    cmd_get_requirement_alternatives,
-    cmd_set_node_policy_data,
     cmd_explain_policy_decision,
 )
 from pdo.client.builder import Context
@@ -114,30 +110,6 @@ def get_rego_policy(state, contract_id, user, **cmd_args):
 def get_requirements(state, contract_id, user, **cmd_args):
     return _invoke_rego_policy_agent(
         state, contract_id, user, cmd_get_requirements, **cmd_args
-    )
-
-
-def set_policy_graph(state, contract_id, user, **cmd_args):
-    return _invoke_rego_policy_agent(
-        state, contract_id, user, cmd_set_policy_graph, **cmd_args
-    )
-
-
-def get_policy_graph(state, contract_id, user, **cmd_args):
-    return _invoke_rego_policy_agent(
-        state, contract_id, user, cmd_get_policy_graph, **cmd_args
-    )
-
-
-def get_requirement_alternatives(state, contract_id, user, **cmd_args):
-    return _invoke_rego_policy_agent(
-        state, contract_id, user, cmd_get_requirement_alternatives, **cmd_args
-    )
-
-
-def set_node_policy_data(state, contract_id, user, **cmd_args):
-    return _invoke_rego_policy_agent(
-        state, contract_id, user, cmd_set_node_policy_data, **cmd_args
     )
 
 
