@@ -12,10 +12,16 @@
 - Python test, against a ledger:
   - Folder: `python`; see `python/README.md`.
 
-- Graph mode, without a ledger:
-  - Script: `graph_test.sh`. It runs the graph combinators' tests (`combinators/`) on OPA
-    and on regorus, and every graph in `graphs/` through the reference implementation
-    (`pdo-rego-graph eval`).
-  - Needs `opa`, and python3 with the regorus bindings (built as
-    `../pdo/rego/graph/engine.py` describes).
+- The graph combinators, without a ledger:
+  - Script: `graph_test.sh`. It runs the tests in `combinators/` of the validator and the
+    planner (`../src/rego/graph_*.rego`) on OPA and on regorus.
+  - Needs `opa`, and python3 with the regorus Python bindings, which are not on PyPI. Build
+    them from the commit the contract pins (`../src/packages/regorus/build.sh`), with the
+    contract's builtins, so that Rego which runs there also runs in the contract:
+
+    ```bash
+    cd regorus/bindings/python
+    maturin build --release --no-default-features --features "regorus/opa-no-std,regorus/std"
+    ```
+
   - How to run: `bash rego-contract/test/graph_test.sh`.

@@ -8,8 +8,7 @@ A `rego_policy_agent` holds one of two kinds of policy, set once:
   The root component issues the capability, and the agent signs it as a
   `policy_decision`, as for a flat asset policy.
 
-This page is the spec of graph mode. `pdo.rego.graph` is its reference implementation, in
-Python, and `pdo-rego-graph` its command line.
+This page is the spec of graph mode.
 
 ## Terms
 
@@ -60,8 +59,8 @@ Python, and `pdo-rego-graph` its command line.
 - There is no cycle, every node leads to the root, only the root outputs a `Capability`, no
   input takes one, and every component sent with the graph is used by a node.
 
-The validator combinator (`pdo/rego/graph/graph_validator.rego`) checks all of this when the
-graph is set.
+The validator combinator (`src/rego/graph_validator.rego`) checks all of this when the graph
+is set.
 
 ## Components
 
@@ -121,7 +120,7 @@ first.
    subject, claims, index, proof_value}`. The presentations may leave out a role only some
    alternatives read, but not name a role that no alternative reads ("the presentations name a
    role the policy does not read").
-2. Plan (`pdo/rego/graph/graph_planner.rego`). A presented input takes the credentials of its
+2. Plan (`src/rego/graph_planner.rego`). A presented input takes the credentials of its
    type and role that are trusted and, when the graph lists issuers for the type, from one of
    them; a `supplied_key` input takes every credential of its type and role. The active nodes
    are those the root reaches over node sources, ordered producers first. A presented input of
@@ -192,25 +191,6 @@ At most 32 nodes, 16 components, 8 inputs per component, 64 credentials per inpu
 64 requirement alternatives and 64 KB per component source. The engine the contract embeds
 has no time source, so there is no per-component time limit.
 
-## Reference implementation
-
-`pdo.rego.graph` runs the contract's validator and planner and the components on the regorus
-Python bindings, built from the contract's pinned commit with its builtins (see
-`pdo/rego/graph/engine.py` for the build). `pdo.rego.graph.requirements` computes the
-requirement alternatives from the components' interfaces alone, with no Rego engine, for a
-client that has the interfaces already.
-
-```bash
-pdo-rego-graph validate     --graph graph.json --components DIR   # "valid", or the problems and exit 1
-pdo-rego-graph requirements --graph graph.json --components DIR   # the alternatives, smallest first
-pdo-rego-graph eval         --graph graph.json --components DIR --vectors graph_vectors.json
-                                                                  # PASS/FAIL per vector, exit 1 on any FAIL
-```
-
-`DIR` holds `<component id>/component.rego`. The vector format is in
-`pdo/rego/graph/vectors.py`; `test/graphs/download/` has a graph, its components and its
-vectors.
-
 ## Commands
 
 The family's `rego_policy_agent` plugin adds, beside the flat policy's commands:
@@ -230,6 +210,6 @@ decision for either kind of policy. `test/script_test.sh` runs them all against 
 
 | Test | Needs | Runs |
 | --- | --- | --- |
-| `test/graph_test.sh` | `opa`, python3 with the regorus bindings | the combinators on OPA and on regorus, every graph in `test/graphs/` through the reference implementation |
+| `test/graph_test.sh` | `opa`, python3 with the regorus bindings (`test/README.md`) | the combinators' tests, on OPA and on regorus |
 | `test/script_test.sh` | a ledger, services and a guardian (`make test`, `TEST_LIST=^system-rego-script`) | the CLI, for a flat and a graph policy |
 | `test/python/policy_graph_test.py GRAPH COMPONENTS VECTORS` | a ledger and services (see `test/python/README.md`) | a graph's vectors, decided on-chain |

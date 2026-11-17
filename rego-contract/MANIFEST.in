@@ -2,4 +2,3 @@ recursive-include ../build/rego-contract *.b64
 recursive-include etc *.toml
 recursive-include context *.toml
 recursive-include scripts *.psh *.sh
-recursive-include pdo/rego/graph *.rego

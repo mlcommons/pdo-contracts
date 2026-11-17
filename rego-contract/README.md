@@ -70,8 +70,7 @@ components and their hash, `get_requirement_alternatives` lists the bundles of
 credentials that satisfy the graph, `set_node_policy_data` sets one node's policy data,
 and `explain_policy_decision` shows how a presentation fares without signing anything.
 [docs/policy_graph.md](docs/policy_graph.md) is the spec, with the methods, the
-`rego_policy_agent` commands, the limits and the denial reasons; `pdo.rego.graph` is its
-reference implementation and `pdo-rego-graph` its command line.
+`rego_policy_agent` commands, the limits and the denial reasons.
 
 ## Tests
 
@@ -81,7 +80,6 @@ reference implementation and `pdo-rego-graph` its command line.
   `rego_policy_agent_test.py` for both roles of the policy agent, and
   `policy_graph_test.py`, which decides a graph's vectors on-chain
   (`test/python/README.md`).
-- `test/graph_test.sh`: graph mode without a ledger -- the graph combinators on OPA and
-  regorus, and the vectors of `test/graphs/` through the reference implementation. It
-  needs `opa` and python3 with the regorus bindings (built as `pdo/rego/graph/engine.py`
-  describes), and is not part of `make test`.
+- `test/graph_test.sh`: the graph combinators' tests, on OPA and on regorus, without a
+  ledger. It needs `opa` and python3 with the regorus bindings (`test/README.md` says how
+  to build them), and is not part of `make test`.

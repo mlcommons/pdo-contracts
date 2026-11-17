@@ -16,8 +16,8 @@
 #pragma once
 
 // The graph combinators: trusted Rego, like the two in rego_combinators.h. CMake
-// generates this header from pdo/rego/graph/graph_validator.rego and graph_planner.rego,
-// which the reference implementation (pdo.rego.graph) runs too.
+// generates this header from src/rego/graph_validator.rego and graph_planner.rego. A checker
+// that must decide as the contract does (policy_fabric's card tests) reads those two files.
 
 static const char REGO_GRAPH_VALIDATOR[] = R"REGO(@REGO_GRAPH_VALIDATOR@)REGO";
 

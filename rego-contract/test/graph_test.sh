@@ -13,17 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Graph mode without a ledger: the graph combinators on OPA and on regorus, and the vectors of
-# every graph in test/graphs/ through the reference implementation.
-# Needs opa, and python3 with the regorus bindings (pdo/rego/graph/engine.py).
+# The graph combinators' tests without a ledger, on OPA and on regorus, the engine the
+# contract embeds. Needs opa, and python3 with the regorus bindings (see test/README.md).
 set -e
 cd "$(dirname "$0")/.."
-export PYTHONPATH=$PWD
 
-opa test pdo/rego/graph test/combinators
+opa test src/rego/graph_validator.rego src/rego/graph_planner.rego test/combinators
 python3 test/combinators/run_tests.py
-for graph in test/graphs/*/graph.json; do
-    folder=$(dirname "$graph")
-    python3 -m pdo.rego.graph.cli eval --graph "$graph" --components "$folder/components" \
-        --vectors "$folder/graph_vectors.json"
-done

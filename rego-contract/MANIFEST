@@ -21,11 +21,3 @@ pdo/rego/utils.py
 pdo/rego/decentralized/__init__.py
 pdo/rego/decentralized/rego_policy_agent.py
 pdo/rego/decentralized/rego_token.py
-pdo/rego/graph/__init__.py
-pdo/rego/graph/cli.py
-pdo/rego/graph/engine.py
-pdo/rego/graph/graph_planner.rego
-pdo/rego/graph/graph_validator.rego
-pdo/rego/graph/policy_graph.py
-pdo/rego/graph/requirements.py
-pdo/rego/graph/vectors.py

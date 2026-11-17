@@ -4,9 +4,26 @@
     python policy_graph_test.py <graph.json> <components folder> <graph_vectors.json>
     python cleanup.py
 
-The components folder holds <id>/component.rego, and the vectors follow the format
-pdo.rego.graph.vectors describes; ../graphs/download/ has all three. Every DID the vectors
-name as an issuer or signer becomes a signature authority, the registry they describe
+The components folder holds <id>/component.rego; ../graphs/download/ has all three. The vectors
+name their credentials once and build each case from them (policy_fabric's cards use the same
+format):
+
+    {
+      "registry":    {<type>: [<signer>, ...]},                 whom the agent trusts, per type
+      "request":     {...},                                      what the requester declares
+      "policy_data": {<node>: {...}},                            every node's policy data
+      "credentials": {<name>: {"type", "issuer", "signer", "subject", "claims"}},
+      "vectors": [
+        {"name": "...",
+         "present": {<role>: [<credential name>, ...]},
+         "change":  {<credential name>: <JSON merge patch>},       {} for none
+         "expect":  {"decision": true, "subject", "operation", "evidence", "verified"}
+                 or {"decision": false, "missing": [{"node", "input"}]}
+                 or {"decision": false, "reason": "<why>"}}
+      ]
+    }
+
+Every name the vectors give an issuer or signer becomes a signature authority, the registry
 becomes the agent's trusted issuers, and each vector is presented from fresh wallets, one
 per role. A credential with a "signing_key" is signed by an authority of its own standing
 for that key, under the signer it names, and the key's name stands for that authority's
@@ -14,9 +31,10 @@ PEM wherever the vectors use it. The names of the issuers and keys are replaced 
 DIDs and PEMs throughout: subjects, claims, policy data, request, expectations and the
 graph's trusted_issuers lists. Each node's policy_data in the graph file is replaced by the
 vectors' policy_data. The contract must reach the decision the vector expects: an allow must
-issue the expected operation about the expected subject (its evidence and verified are left
-to the reference implementation), a denial for missing inputs must name the same inputs in
-explain_policy_decision, and any other denial's error must contain the expected reason.
+issue the expected operation about the expected subject (evidence and verified, which name the
+credentials the decision rested on, are not visible on-chain), a denial for missing inputs must
+name the same inputs in explain_policy_decision, and any other denial's error must contain the
+expected reason.
 """
 
 import base64
