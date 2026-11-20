@@ -14,7 +14,7 @@
 
 - The graph combinators, without a ledger:
   - Script: `graph_test.sh`. It runs the tests in `combinators/` of the validator and the
-    planner (`../src/rego/graph_*.rego`) on OPA and on regorus.
+    planner (`../src/rego/common/graph_*.rego`) on OPA and on regorus.
   - Needs `opa`, and python3 with the regorus Python bindings, which are not on PyPI. Build
     them from the commit the contract pins (`../src/packages/regorus/build.sh`), with the
     contract's builtins, so that Rego which runs there also runs in the contract:

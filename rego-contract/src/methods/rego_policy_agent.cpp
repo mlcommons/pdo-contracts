@@ -34,7 +34,7 @@
 #include "contract/base.h"
 #include "identity/policy_agent.h" // inherited trusted-issuer / verify / issue methods
 #include "rego/rego_policy_agent.h"
-#include "rego/policy_graph.h"     // validate, expand, plan and run a policy graph
+#include "rego/common/policy_graph.h" // validate, expand, plan and run a policy graph
 #include "identity/common/Credential.h"
 #include "identity/common/did.h"
 #include "identity/crypto/Crypto.h"       // SHA384Hash, used for direct-key EC verification

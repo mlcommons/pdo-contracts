@@ -26,7 +26,7 @@ from pathlib import Path
 import regorus
 
 HERE = Path(__file__).resolve().parent
-COMBINATORS = HERE.parents[1] / "src" / "rego"
+COMBINATORS = HERE.parents[1] / "src" / "rego" / "common"
 
 engine = regorus.Engine()
 for path in sorted(COMBINATORS.glob("*.rego")) + sorted(HERE.glob("*.rego")):

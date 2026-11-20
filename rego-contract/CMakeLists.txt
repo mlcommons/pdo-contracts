@@ -21,14 +21,14 @@ ADD_CUSTOM_TARGET(
 )
 
 # -----------------------------------------------------------------
-# The graph combinators are Rego sources (src/rego/graph_*.rego); embed them in a
+# The graph combinators are Rego sources (src/rego/common/graph_*.rego); embed them in a
 # generated header.
 # -----------------------------------------------------------------
-SET(REGO_GRAPH_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/rego)
+SET(REGO_GRAPH_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/rego/common)
 SET(REGO_GENERATED_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 FILE(READ ${REGO_GRAPH_SOURCES}/graph_validator.rego REGO_GRAPH_VALIDATOR)
 FILE(READ ${REGO_GRAPH_SOURCES}/graph_planner.rego REGO_GRAPH_PLANNER)
-CONFIGURE_FILE(src/rego/rego_graph_combinators.h.in ${REGO_GENERATED_INCLUDE_DIR}/rego/rego_graph_combinators.h @ONLY)
+CONFIGURE_FILE(src/rego/common/rego_graph_combinators.h.in ${REGO_GENERATED_INCLUDE_DIR}/rego/common/rego_graph_combinators.h @ONLY)
 SET_PROPERTY(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
   ${REGO_GRAPH_SOURCES}/graph_validator.rego ${REGO_GRAPH_SOURCES}/graph_planner.rego)
 

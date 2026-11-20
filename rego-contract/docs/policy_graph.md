@@ -53,8 +53,8 @@ agent signs it as a `policy_decision`. This page is the spec.
 - There is no cycle, every node leads to the root, only the root outputs a `Capability`, no
   input takes one, and every component sent with the graph is used by a node.
 
-The validator combinator (`src/rego/graph_validator.rego`) checks all of this when the graph
-is set.
+The validator combinator (`src/rego/common/graph_validator.rego`) checks all of this when
+the graph is set.
 
 ## Components
 
@@ -113,7 +113,7 @@ whose expansion holds more than 64 at any step is refused, even if fewer remain 
    proof_value}`, numbered role by role. The presentations may leave out a role only some
    alternatives read, but not name a role that no alternative reads ("the presentations name a
    role the policy does not read").
-2. Plan (`src/rego/graph_planner.rego`). A presented input takes the credentials of its
+2. Plan (`src/rego/common/graph_planner.rego`). A presented input takes the credentials of its
    type and role that are trusted and, when the graph lists issuers for the type, from one of
    them; a `supplied_key` input takes every credential of its type and role. The active nodes
    are those the root reaches over node sources, ordered producers first. A presented input of

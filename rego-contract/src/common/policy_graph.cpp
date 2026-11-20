@@ -27,9 +27,9 @@
 #include "Value.h"
 #include "WasmExtensions.h"
 
-#include "rego/policy_graph.h"
+#include "rego/common/policy_graph.h"
 #include "rego/rego_evaluator.h"
-#include "rego/rego_graph_combinators.h" // generated from src/rego/graph_*.rego
+#include "rego/common/rego_graph_combinators.h" // generated from src/rego/common/graph_*.rego
 
 // A component is the package pf.components.<component id>, with an interface rule and
 // an output rule.

@@ -18,5 +18,5 @@
 set -e
 cd "$(dirname "$0")/.."
 
-opa test src/rego/graph_validator.rego src/rego/graph_planner.rego test/combinators
+opa test src/rego/common/graph_validator.rego src/rego/common/graph_planner.rego test/combinators
 python3 test/combinators/run_tests.py

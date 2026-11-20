@@ -39,8 +39,8 @@
     "}"
 
 // set_rego_policy: set the policy, a graph of components, once (see
-// rego/policy_graph.h and docs/policy_graph.md). Trusting the agent means trusting
-// this one policy, so it never changes.
+// rego/common/policy_graph.h and docs/policy_graph.md). Trusting the agent means
+// trusting this one policy, so it never changes.
 //   { "policy_graph": <graph>, "components": [ [ component_id, source ], ... ] }
 #define REGO_POLICY_AGENT_SET_POLICY_PARAM_SCHEMA                       \
     "{"                                                                 \
