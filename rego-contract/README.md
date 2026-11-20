@@ -37,7 +37,7 @@ methods, the `rego_policy_agent` commands, the limits and the denial reasons.
   `system-rego-script` (`test/README.md`).
 - `test/python/`: the Python API against a ledger -- `stateless_test.py`, the same
   flow through the token and a guardian, and `policy_graph_test.py`, which decides a
-  graph's vectors on-chain (`test/python/README.md`).
+  graph's tests on-chain (`test/python/README.md`).
 - `test/graph_test.sh`: the graph combinators' tests, on OPA and on regorus, without a
   ledger. It needs `opa` and python3 with the regorus bindings (`test/README.md` says how
   to build them), and is not part of `make test`.

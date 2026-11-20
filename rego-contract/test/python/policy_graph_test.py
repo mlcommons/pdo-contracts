@@ -1,11 +1,11 @@
-"""A policy graph against a live deployment, decided by its test vectors.
+"""A policy graph against a live deployment, decided by its graph tests.
 
     python startup.py
-    python policy_graph_test.py <graph.json> <components folder> <graph_vectors.json>
+    python policy_graph_test.py <graph.json> <components folder> <graph_tests.json>
     python cleanup.py
 
-The components folder holds <id>/component.rego; ../graphs/download/ has all three. The vectors
-name their credentials once and build each case from them (policy_fabric's cards use the same
+The components folder holds <id>/component.rego; ../graphs/download/ has all three. The tests
+name their credentials once and build each test from them (policy_fabric's cards use the same
 format):
 
     {
@@ -13,7 +13,7 @@ format):
       "request":     {...},                                      what the requester declares
       "policy_data": {<node>: {...}},                            every node's policy data
       "credentials": {<name>: {"type", "issuer", "signer", "subject", "claims"}},
-      "vectors": [
+      "tests": [
         {"name": "...",
          "present": {<role>: [<credential name>, ...]},
          "change":  {<credential name>: <JSON merge patch>},       {} for none
@@ -23,17 +23,17 @@ format):
       ]
     }
 
-Every name the vectors give an issuer or signer becomes a signature authority, the registry
-becomes the agent's trusted issuers, and each vector is presented from fresh wallets, one
+Every name the tests give an issuer or signer becomes a signature authority, the registry
+becomes the agent's trusted issuers, and each test is presented from fresh wallets, one
 per role. A credential with a "signing_key" is signed by an authority of its own standing
 for that key, under the signer it names, and the key's name stands for that authority's
-PEM wherever the vectors use it. The names of the issuers and keys are replaced by their
+PEM wherever the tests use it. The names of the issuers and keys are replaced by their
 DIDs and PEMs throughout: subjects, claims, policy data, request, expectations and the
 graph's trusted_issuers lists. Each node's policy_data in the graph file is replaced by the
-vectors' policy_data. The contract must reach the decision the vector expects: an allow must
+tests' policy_data. The contract must reach the decision the test expects: an allow must
 issue the expected operation about the expected subject (evidence and verified, which name the
 credentials the decision rested on, are not visible on-chain), a denial for missing inputs must
-name one of the inputs the vector expects missing (the contract's error names the first it
+name one of the inputs the test expects missing (the contract's error names the first it
 finds), and any other denial's error must contain the expected reason.
 """
 
@@ -55,10 +55,10 @@ ISSUER = "user1"
 OWNER = "user2"
 HOLDER = "user3"
 
-GRAPH_FILE, COMPONENTS, VECTORS = (os.path.abspath(arg) for arg in sys.argv[1:4])
+GRAPH_FILE, COMPONENTS, TESTS = (os.path.abspath(arg) for arg in sys.argv[1:4])
 with open(GRAPH_FILE) as fp:
     GRAPH = json.load(fp)
-with open(VECTORS) as fp:
+with open(TESTS) as fp:
     SUITE = json.load(fp)
 
 state, _ = setup_pdo_state()
@@ -88,7 +88,7 @@ def created(contract_id):
 
 
 def merge_patch(target, patch):
-    """RFC 7386, as the vectors' changes are written."""
+    """RFC 7386, as the tests' changes are written."""
     if not isinstance(patch, dict):
         return copy.deepcopy(patch)
     out = copy.deepcopy(target) if isinstance(target, dict) else {}
@@ -100,17 +100,17 @@ def merge_patch(target, patch):
     return out
 
 
-def credentials_of(vector):
-    """The vector's credentials, its changes applied."""
+def credentials_of(graph_test):
+    """The test's credentials, its changes applied."""
     return {
-        name: merge_patch(cred, vector["change"][name]) if name in vector["change"] else cred
+        name: merge_patch(cred, graph_test["change"][name]) if name in graph_test["change"] else cred
         for name, cred in SUITE["credentials"].items()
     }
 
 
 # ---------------------------------------------------------------- the issuers
 placeholders = sorted(
-    {c[key] for vector in SUITE["vectors"] for c in credentials_of(vector).values() for key in ("issuer", "signer")}
+    {c[key] for graph_test in SUITE["tests"] for c in credentials_of(graph_test).values() for key in ("issuer", "signer")}
     | {d for dids in SUITE["registry"].values() for d in dids}
     | {d for dids in GRAPH["trusted_issuers"].values() for d in dids}
 )
@@ -124,7 +124,7 @@ for placeholder in placeholders:
 dids = {placeholder: f"did:pdo:{contract_id}" for placeholder, contract_id in authorities.items()}
 
 key_names = sorted(
-    {c["signing_key"] for vector in SUITE["vectors"] for c in credentials_of(vector).values() if "signing_key" in c}
+    {c["signing_key"] for graph_test in SUITE["tests"] for c in credentials_of(graph_test).values() if "signing_key" in c}
 )
 key_holders, pems = {}, {}
 for key_name in key_names:
@@ -198,26 +198,26 @@ def signed(name, credential):
     return signed_cache[key]
 
 
-def presentation(vector, number):
-    """One fresh wallet per role holding exactly the vector's credentials, presented."""
-    credentials = credentials_of(vector)
+def presentation(graph_test, number):
+    """One fresh wallet per role holding exactly the test's credentials, presented."""
+    credentials = credentials_of(graph_test)
     presented = {}
-    for role, names in sorted(vector["present"].items()):
-        wallet = created(identity.create_identity(state, HOLDER, description=f"vector {number} {role}"))
+    for role, names in sorted(graph_test["present"].items()):
+        wallet = created(identity.create_identity(state, HOLDER, description=f"test {number} {role}"))
         for name in names:
             identity.add_vc(state, wallet, HOLDER, credential_file=signed(name, credentials[name]))
-        vp_path = scratch(f"vector_{number}_{role}_vp.json")
+        vp_path = scratch(f"test_{number}_{role}_vp.json")
         identity.get_vp(
             state, wallet, HOLDER, types=sorted({credentials[n]["type"] for n in names}), output_file=vp_path
         )
         presented[role] = read_json(vp_path)
-    return write_json(f"vector_{number}_presentation.json", presented)
+    return write_json(f"test_{number}_presentation.json", presented)
 
 
-def decided(vector, number):
-    """Whether the contract reached the decision the vector expects, and what it did."""
-    presentation_file = presentation(vector, number)
-    issued = scratch(f"vector_{number}_decision.json")
+def decided(graph_test, number):
+    """Whether the contract reached the decision the test expects, and what it did."""
+    presentation_file = presentation(graph_test, number)
+    issued = scratch(f"test_{number}_decision.json")
     try:
         policy_agent.issue_policy_credential(
             state, agent, HOLDER, presentation=presentation_file, request=REQUEST, issued_credential=issued
@@ -225,7 +225,7 @@ def decided(vector, number):
         error = None
     except Exception as e:
         error = str(e)
-    expect = vector["expect"]
+    expect = graph_test["expect"]
 
     if expect["decision"]:
         if error is not None:
@@ -242,9 +242,9 @@ def decided(vector, number):
 
 
 failed = 0
-for number, vector in enumerate(SUITE["vectors"]):
-    ok, detail = decided(vector, number)
+for number, graph_test in enumerate(SUITE["tests"]):
+    ok, detail = decided(graph_test, number)
     failed += not ok
-    print(("PASS  " if ok else "FAIL  ") + vector["name"] + ("" if ok else f"  [{detail}]"))
-print(f"{len(SUITE['vectors']) - failed}/{len(SUITE['vectors'])} vectors decided on-chain as expected")
+    print(("PASS  " if ok else "FAIL  ") + graph_test["name"] + ("" if ok else f"  [{detail}]"))
+print(f"{len(SUITE['tests']) - failed}/{len(SUITE['tests'])} graph tests decided on-chain as expected")
 sys.exit(1 if failed else 0)

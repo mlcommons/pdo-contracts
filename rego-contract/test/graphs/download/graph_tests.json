@@ -19,7 +19,7 @@
     "grant": {"type": "membership_grant", "issuer": "did:example:office", "signer": "did:example:office",
               "subject": "did:example:applicant", "claims": {}}
   },
-  "vectors": [
+  "tests": [
     {
       "name": "allow: an allowed membership and the requested key",
       "present": {"applicant": ["membership", "key"]},

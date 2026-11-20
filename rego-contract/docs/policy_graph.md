@@ -199,4 +199,4 @@ The family's `rego_policy_agent` command (also a `pdo-shell` plugin) has:
 | `test/graph_test.sh` | `opa`, python3 with the regorus bindings (`test/README.md`) | the combinators' tests, on OPA and on regorus |
 | `test/script_test.sh` | a ledger and services (`make test`, `TEST_LIST=^system-rego-script`); it starts its own guardian | the CLI flow, through the token and a guardian |
 | `test/python/stateless_test.py` | a ledger, services and a guardian (see `test/python/README.md`) | the same flow through the Python API |
-| `test/python/policy_graph_test.py GRAPH COMPONENTS VECTORS` | a ledger and services (see `test/python/README.md`) | a graph's vectors, decided on-chain |
+| `test/python/policy_graph_test.py GRAPH COMPONENTS TESTS` | a ledger and services (see `test/python/README.md`) | a graph's tests, decided on-chain |
