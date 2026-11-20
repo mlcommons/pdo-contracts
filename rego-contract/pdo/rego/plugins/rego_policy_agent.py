@@ -37,7 +37,6 @@ __all__ = [
     "op_set_policy_data",
     "op_get_policy_data",
     "op_issue_policy_credential",
-    "op_explain_policy_decision",
     "cmd_create_rego_policy_agent",
     "cmd_set_rego_policy",
     "cmd_get_rego_policy",
@@ -48,7 +47,6 @@ __all__ = [
     "cmd_set_policy_data",
     "cmd_get_policy_data",
     "cmd_issue_policy_credential",
-    "cmd_explain_policy_decision",
     "do_rego_policy_agent",
     "do_rego_policy_agent_contract",
     "load_commands",
@@ -189,42 +187,6 @@ class op_set_policy_data(pcontract.contract_op_base):
     def invoke(cls, state, session_params, node, policy_data, **kwargs):
         session_params["commit"] = True
         message = invocation_request("set_policy_data", node=node, policy_data=policy_data)
-        result = pcontract_cmd.send_to_contract(state, message, **session_params)
-        cls.log_invocation(message, result)
-        return result
-
-
-# -----------------------------------------------------------------
-# op_explain_policy_decision
-#   Plan and run the policy over the presentations; nothing is verified or signed.
-# -----------------------------------------------------------------
-class op_explain_policy_decision(pcontract.contract_op_base):
-    name = "explain_policy_decision"
-    help = "plan and run the policy over the presentations, without verifying or signing"
-
-    @classmethod
-    def add_arguments(cls, subparser):
-        subparser.add_argument(
-            "-p",
-            "--presentation",
-            help="role-keyed verifiable presentations (JSON)",
-            type=pbuilder.invocation_parameter,
-            required=True,
-        )
-        subparser.add_argument(
-            "-r",
-            "--request",
-            help="values the requester declares, e.g. the channel key (JSON)",
-            type=pbuilder.invocation_parameter,
-            required=True,
-        )
-
-    @classmethod
-    def invoke(cls, state, session_params, presentation, request, **kwargs):
-        session_params["commit"] = False
-        message = invocation_request(
-            "explain_policy_decision", presentation=presentation, request=request
-        )
         result = pcontract_cmd.send_to_contract(state, message, **session_params)
         cls.log_invocation(message, result)
         return result
@@ -389,46 +351,6 @@ class cmd_set_policy_data(pcommand.contract_command_base):
 
 
 # -----------------------------------------------------------------
-# cmd_explain_policy_decision
-# -----------------------------------------------------------------
-class cmd_explain_policy_decision(pcommand.contract_command_base):
-    name = "explain"
-    help = "plan and run the policy over the presentations, without verifying or signing"
-
-    @classmethod
-    def add_arguments(cls, subparser):
-        subparser.add_argument(
-            "--presentation",
-            help="The name of the file where the role-keyed verifiable presentations are stored",
-            type=str,
-            required=True,
-        )
-        subparser.add_argument(
-            "--request",
-            help="values the requester declares, e.g. the channel key (JSON)",
-            type=pbuilder.invocation_parameter,
-            required=True,
-        )
-
-    @classmethod
-    def invoke(cls, state, context, presentation, request, **kwargs):
-        with open(presentation, "r") as fp:
-            presentation_data = json.load(fp)
-        result = pcontract.invoke_contract_op(
-            op_explain_policy_decision,
-            state,
-            context,
-            _agent_session(state, context),
-            presentation=presentation_data,
-            request=request,
-            **kwargs,
-        )
-        result = json.loads(result)
-        cls.display(result)
-        return result
-
-
-# -----------------------------------------------------------------
 # Create the generic, shell independent version of the aggregate command
 # -----------------------------------------------------------------
 __operations__ = [
@@ -442,7 +364,6 @@ __operations__ = [
     op_set_policy_data,
     op_get_policy_data,
     op_issue_policy_credential,
-    op_explain_policy_decision,
 ]
 
 do_rego_policy_agent_contract = pcontract.create_shell_command(
@@ -460,7 +381,6 @@ __commands__ = [
     cmd_set_policy_data,
     cmd_get_policy_data,
     cmd_issue_policy_credential,
-    cmd_explain_policy_decision,
 ]
 
 do_rego_policy_agent = pcommand.create_shell_command("rego_policy_agent", __commands__)

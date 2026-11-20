@@ -339,9 +339,7 @@ echo "{\"applicant\": $(cat ${TEST_ROOT}/vp.json)}" > ${TEST_ROOT}/presentation.
 F_REQUEST=$(python3 -c 'import json,sys; print(json.dumps({"channel_key": json.load(open(sys.argv[1]))["credentialSubject"]["claims"]["key"]}))' \
     ${TEST_ROOT}/user_channel_key/credential_key.json)
 
-yell explain the decision, then issue it from the same presentation
-try rego_policy_agent explain ${OPTS} --contract identity.rego_download.rego_policy_agent \
-    --presentation ${TEST_ROOT}/presentation.json --request "${F_REQUEST}"
+yell issue a policy decision credential
 try rego_policy_agent issue_credential ${OPTS} --contract identity.rego_download.rego_policy_agent \
     --presentation ${TEST_ROOT}/presentation.json --request "${F_REQUEST}" \
     --issued-credential ${TEST_ROOT}/policy_vc.json

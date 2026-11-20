@@ -129,11 +129,6 @@ whose expansion holds more than 64 at any step is refused, even if fewer remain 
    one. Any failure denies.
 6. Sign a `policy_decision` about the capabilities' subject, whose claims are their operation.
 
-`explain_policy_decision` runs steps 1 to 4 and returns the plan, each node's output and the
-verdict; it verifies nothing and signs nothing. When a presented input has nothing to take it
-runs no component and returns `decision: false`, reason "missing inputs", with the plan's
-`missing` entries.
-
 ### Denials and errors
 
 A denial fails `issue_policy_credential` with "policy evaluation denied, " and one of:
@@ -145,10 +140,9 @@ A denial fails `issue_policy_credential` with "policy evaluation denied, " and o
 | `the capabilities disagree` | step 4: the root's capabilities differ in subject or operation |
 | `credential verification failed` | step 5 |
 
-`explain_policy_decision` reports the same reasons without the prefix (and "missing inputs"
-for the first). These are errors, not denials, and say the policy or the call is wrong:
-"unexpected error, node N returned an ill-formed output", and any problem the validator finds
-when the policy is set.
+These are errors, not denials, and say the policy or the call is wrong: "unexpected error,
+node N returned an ill-formed output", and any problem the validator finds when the policy is
+set.
 
 ## Methods
 
@@ -160,7 +154,6 @@ when the policy is set.
 | `set_policy_data` | `{node, policy_data}` | `true` | owner |
 | `get_policy_data` | none | `{node: policy_data}` | anyone |
 | `issue_policy_credential` | `{presentation: {role: <verifiable presentation>}, request}` | the signed `policy_decision` | anyone |
-| `explain_policy_decision` | as `issue_policy_credential` | `{plan, outputs, decision, reason}` | anyone |
 
 The trusted-issuer methods (`register_trusted_issuer`, `unregister_trusted_issuer`, owner;
 `list_trusted_issuers`, anyone) are the identity family's `policy_agent`'s.
@@ -194,7 +187,6 @@ The family's `rego_policy_agent` command (also a `pdo-shell` plugin) has:
 | `get_requirements` | | prints the alternatives |
 | `set_policy_data` | `--node ID --data FILE` | replaces one node's policy data |
 | `get_policy` | `[--file FILE]` | prints every node's policy data |
-| `explain` | `--presentation FILE --request JSON` | runs `explain_policy_decision` |
 | `issue_credential` | `--presentation FILE --request JSON --issued-credential FILE` | issues the decision |
 | `register`, `unregister`, `list_issuers` | | the trusted issuers, as for the identity family's policy agent |
 

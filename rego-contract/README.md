@@ -28,10 +28,8 @@ Each component reads credentials and outputs credentials, and the root issues th
 capability. A trusted validator checks the graph when it is set, and a trusted planner
 decides per request which components run and whether a presented credential stands
 in for a component's output. `get_requirements` lists the bundles of credentials that
-satisfy the policy, and `explain_policy_decision` shows how a presentation fares
-without signing anything. [docs/policy_graph.md](docs/policy_graph.md) is the spec,
-with the methods, the `rego_policy_agent` commands, the limits and the denial
-reasons.
+satisfy the policy. [docs/policy_graph.md](docs/policy_graph.md) is the spec, with the
+methods, the `rego_policy_agent` commands, the limits and the denial reasons.
 
 ## Tests
 

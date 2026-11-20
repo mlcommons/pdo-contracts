@@ -104,10 +104,6 @@ namespace rego_policy_agent
     // policy_decision credential
     bool issue_policy_credential(const Message& msg, const Environment& env, Response& rsp);
 
-    // plan and run the policy over a presentation and return the plan, each node's
-    // output and the verdict; nothing is verified or signed
-    bool explain_policy_decision(const Message& msg, const Environment& env, Response& rsp);
-
 }; // rego_policy_agent
 }; // rego
 }; // ww
