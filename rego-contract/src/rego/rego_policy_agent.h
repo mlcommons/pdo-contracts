@@ -27,14 +27,15 @@
 // table); the methods that hold and run the policy are declared here.
 
 // The top level of a policy graph; the graph validator combinator checks the rest.
-//   { "version": 2, "name", "root", "nodes": { <node>: { component, inputs, policy_data } },
+//   { "version": 3, "name", "nodes": { <node>: { component, inputs, policy_data } },
+//     "capability": { operation, requires, parameters },
 //     "trusted_issuers": { <credential type>: [ <DID>, ... ] } }
 #define REGO_POLICY_GRAPH_SCHEMA                \
     "{"                                         \
         SCHEMA_KW(version, 0) ","               \
         SCHEMA_KW(name, "") ","                 \
-        SCHEMA_KW(root, "") ","                 \
         SCHEMA_KW(nodes, {}) ","                \
+        SCHEMA_KW(capability, {}) ","           \
         SCHEMA_KW(trusted_issuers, {})          \
     "}"
 
@@ -100,8 +101,8 @@ namespace rego_policy_agent
     bool set_policy_data(const Message& msg, const Environment& env, Response& rsp);
 
     // plan and run the policy over the presentations, verify every credential the
-    // components were given, and -- if the root issued a capability -- sign it as a
-    // policy_decision credential
+    // components and the capability's parameters were given, and -- if the capability
+    // holds -- sign its operation as a policy_decision credential
     bool issue_policy_credential(const Message& msg, const Environment& env, Response& rsp);
 
 }; // rego_policy_agent

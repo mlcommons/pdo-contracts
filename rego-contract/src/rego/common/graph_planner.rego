@@ -1,13 +1,16 @@
 # REGO_GRAPH_PLANNER: the trusted planner issue_policy_credential runs over a validated policy
 # graph and the presented credentials, before any component. It decides which source each
-# input takes, which nodes run and in which order, and which presented inputs have nothing to
-# take. The contract embeds this source.
+# input takes, which nodes run and in which order, which presented credentials each parameter
+# of the capability may be read from, and which presented inputs have nothing to take. The
+# contract embeds this source.
 #   input : { "graph": <policy graph>, "interfaces": { <component id>: <interface> },
 #             "presented": { <role>: [ <credential view>, ... ] } }
 #   output (data.plan.result):
 #           { "order": [ <node>, ... ],               # the active nodes, producers first
-#             "bindings": { <node>: { <input>: [ <entry>, ... ] } },   # one entry per source
-#             "missing": [ { "node", "input", "type", "role" }, ... ] }
+#             "bindings": { <node>: { <input>: <entry> } },
+#             "parameters": { <parameter>: [ <index>, ... ] },
+#             "missing": [ { "node", "input", "type", "role" }
+#                          or { "parameter", "type", "role" }, ... ] }
 #   An entry is { "from": "presented", "indices": [ <index>, ... ] } or
 #   { "from": "node", "node": <node> }.
 #
@@ -22,9 +25,7 @@ policy := input.graph
 
 nodes := policy.nodes
 
-as_list(x) := x if is_array(x)
-
-as_list(x) := [x] if not is_array(x)
+capability := policy.capability
 
 spec(n, name) := input.interfaces[nodes[n].component].inputs[name]
 
@@ -43,12 +44,14 @@ usable(s, c) if {
 	issuer_listed(s.type, c)
 }
 
-candidates(n, name) := [c.index |
-	s := spec(n, name)
+# the presented credentials s, an input's spec or a parameter, may take
+offered(s) := [c.index |
 	some c in input.presented[s.role]
 	c.type == s.type
 	usable(s, c)
 ]
+
+candidates(n, name) := offered(spec(n, name))
 
 # a node input that accepts presented credentials takes them when there are any, and then
 # the nodes that would produce them are not needed
@@ -64,15 +67,15 @@ entry(n, name, s) := {"from": "presented", "indices": candidates(n, name)} if ta
 
 entry(n, name, s) := {"from": "node", "node": s.node} if not takes_presented(n, name, s)
 
-entries(n, name) := [entry(n, name, s) | some s in as_list(nodes[n].inputs[name])]
-
 # node -> the nodes it reads, over the entries that read a node
 deps[n] := ds if {
 	some n, node in nodes
-	ds := {e.node | some name, _ in node.inputs; some e in entries(n, name); e.from == "node"}
+	ds := {e.node | some name, s in node.inputs; e := entry(n, name, s); e.from == "node"}
 }
 
-active := graph.reachable(deps, {policy.root})
+required := {n | some n in capability.requires}
+
+active := graph.reachable(deps, required)
 
 # a producer's closure is a strict subset of its consumer's, so ordering by closure size
 # runs producers first without recursion
@@ -82,8 +85,10 @@ order := [p[1] | some p in sized]
 
 bindings[n] := slots if {
 	some n in active
-	slots := {name: entries(n, name) | some name, _ in nodes[n].inputs}
+	slots := {name: entry(n, name, s) | some name, s in nodes[n].inputs}
 }
+
+parameters[p] := offered(s) if some p, s in capability.parameters
 
 missing contains {"node": n, "input": name, "type": s.type, "role": s.role} if {
 	some n in active
@@ -93,8 +98,14 @@ missing contains {"node": n, "input": name, "type": s.type, "role": s.role} if {
 	s := spec(n, name)
 }
 
+missing contains {"parameter": p, "type": s.type, "role": s.role} if {
+	some p, s in capability.parameters
+	count(offered(s)) == 0
+}
+
 result := {
 	"order": order,
 	"bindings": bindings,
+	"parameters": parameters,
 	"missing": [m | some m in missing],
 }

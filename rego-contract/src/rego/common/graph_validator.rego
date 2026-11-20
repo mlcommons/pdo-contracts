@@ -14,13 +14,17 @@ policy := input.graph
 
 nodes := policy.nodes
 
+capability := policy.capability
+
+# the capability's list of nodes and its parameters, read only when they have their shape:
+# regorus fails a builtin or an iteration given a value of the wrong kind
+required_list := capability.requires if is_array(capability.requires)
+
+parameters := capability.parameters if is_object(capability.parameters)
+
 interfaces := input.interfaces
 
 presented := {"from": "presented"}
-
-as_list(x) := x if is_array(x)
-
-as_list(x) := [x] if not is_array(x)
 
 text(s) if {
 	is_string(s)
@@ -61,6 +65,25 @@ names contains type if {
 	type := spec.type
 }
 
+# a parameter of the capability is a key of the request and of the operation; its role,
+# type and claim are keys of the presented credentials
+names contains name if some name, _ in parameters
+
+names contains role if {
+	some spec in parameters
+	role := spec.role
+}
+
+names contains type if {
+	some spec in parameters
+	type := spec.type
+}
+
+names contains claim if {
+	some spec in parameters
+	claim := spec.claim
+}
+
 # ---- interfaces
 
 valid_input(spec) if {
@@ -85,6 +108,12 @@ problems contains sprintf("component %v: an interface has exactly output, inputs
 problems contains sprintf("component %v: output must be a credential type", [c]) if {
 	some c, iface in interfaces
 	not text(iface.output)
+}
+
+# the graph's capability issues the capability, from what the nodes it requires produce
+problems contains sprintf("component %v: no component outputs a Capability", [c]) if {
+	some c, iface in interfaces
+	iface.output == "Capability"
 }
 
 problems contains sprintf("component %v: policy_data_schema must be an object", [c]) if {
@@ -116,15 +145,13 @@ problems contains sprintf("component %v is not used by any node", [c]) if {
 
 # ---- the graph and its nodes
 
-problems contains "the graph has exactly version, name, root, nodes and trusted_issuers" if {
-	object.keys(policy) != {"version", "name", "root", "nodes", "trusted_issuers"}
+problems contains "the graph has exactly version, name, nodes, capability and trusted_issuers" if {
+	object.keys(policy) != {"version", "name", "nodes", "capability", "trusted_issuers"}
 }
 
-problems contains "version must be 2" if policy.version != 2
+problems contains "version must be 3" if policy.version != 3
 
 problems contains "name must be a non-empty string" if not text(policy.name)
-
-problems contains sprintf("root %v is not a node", [policy.root]) if not nodes[policy.root]
 
 problems contains sprintf("node %v has exactly component, inputs and policy_data", [n]) if {
 	some n, node in nodes
@@ -147,14 +174,47 @@ problems contains sprintf("node %v binds %v, component %v has %v", [n, sort(obje
 	object.keys(node.inputs) != object.keys(iface.inputs)
 }
 
-problems contains sprintf("the root %v must output a Capability", [policy.root]) if {
-	interfaces[nodes[policy.root].component].output != "Capability"
+# ---- the capability: the operation the graph issues, the nodes that must all hold, and
+# for each parameter of the operation the presented credential whose claim it is
+
+capability_shaped if {
+	is_object(capability)
+	object.keys(capability) == {"operation", "requires", "parameters"}
 }
 
-problems contains sprintf("node %v outputs a Capability but is not the root", [n]) if {
-	some n, node in nodes
-	n != policy.root
-	interfaces[node.component].output == "Capability"
+problems contains "the capability has exactly operation, requires and parameters" if not capability_shaped
+
+problems contains "the capability's operation must be a non-empty string" if not text(capability.operation)
+
+nonempty_list(x) if {
+	is_array(x)
+	count(x) > 0
+}
+
+problems contains "the capability requires a list of at least one node" if not nonempty_list(capability.requires)
+
+problems contains sprintf("the capability requires %v, which is not a node", [n]) if {
+	some n in required_list
+	not nodes[n]
+}
+
+problems contains "the capability requires each node once" if {
+	count({n | some n in required_list}) != count(required_list)
+}
+
+valid_parameter(spec) if {
+	is_object(spec)
+	object.keys(spec) == {"type", "role", "claim"}
+	text(spec.type)
+	text(spec.role)
+	text(spec.claim)
+}
+
+problems contains "the capability's parameters must be an object" if not is_object(capability.parameters)
+
+problems contains sprintf("capability parameter %v: a parameter is {type, role, claim}", [p]) if {
+	some p, spec in parameters
+	not valid_parameter(spec)
 }
 
 # ---- sources
@@ -162,6 +222,7 @@ problems contains sprintf("node %v outputs a Capability but is not the root", [n
 valid_source(s) if s == presented
 
 valid_source(s) if {
+	is_object(s)
 	object.keys(s) == {"from", "node", "accept_presented"}
 	s.from == "node"
 	text(s.node)
@@ -170,54 +231,21 @@ valid_source(s) if {
 
 problems contains sprintf("node %v input %v: a source is {from: presented} or {from: node, node, accept_presented}", [n, name]) if {
 	some n, node in nodes
-	some name, raw in node.inputs
-	some s in as_list(raw)
+	some name, s in node.inputs
 	not valid_source(s)
-}
-
-# an input with several sources takes the outputs of several nodes, such as the grants of
-# several cards on one dataset
-problems contains sprintf("node %v input %v: a list of sources reads at least two distinct nodes", [n, name]) if {
-	some n, node in nodes
-	some name, raw in node.inputs
-	is_array(raw)
-	count({s.node | some s in raw}) < 2
-}
-
-list_source(s) if {
-	valid_source(s)
-	s.from == "node"
-	s.accept_presented == false
-}
-
-problems contains sprintf("node %v input %v: a list of sources reads each node once, with accept_presented false", [n, name]) if {
-	some n, node in nodes
-	some name, raw in node.inputs
-	is_array(raw)
-	some s in raw
-	not list_source(s)
-}
-
-problems contains sprintf("node %v input %v: a list of sources reads each node once, with accept_presented false", [n, name]) if {
-	some n, node in nodes
-	some name, raw in node.inputs
-	is_array(raw)
-	count({s.node | some s in raw}) != count(raw)
 }
 
 problems contains sprintf("node %v input %v reads unknown node %v", [n, name, s.node]) if {
 	some n, node in nodes
-	some name, raw in node.inputs
-	some s in as_list(raw)
+	some name, s in node.inputs
 	s.from == "node"
 	not nodes[s.node]
 }
 
 problems contains sprintf("node %v input %v wants %v, node %v outputs %v", [n, name, want, s.node, got]) if {
 	some n, node in nodes
-	some name, raw in node.inputs
+	some name, s in node.inputs
 	want := interfaces[node.component].inputs[name].type
-	some s in as_list(raw)
 	s.from == "node"
 	got := interfaces[nodes[s.node].component].output
 	got != want
@@ -230,11 +258,11 @@ problems contains sprintf("node %v input %v: an input the component checks again
 	raw != presented
 }
 
-# ---- shape: no cycle, every node leads to the root
+# ---- shape: no cycle, every node leads to a node the capability requires
 
 deps[n] := ds if {
 	some n, node in nodes
-	ds := {s.node | some _, raw in node.inputs; some s in as_list(raw); s.from == "node"}
+	ds := {s.node | some _, s in node.inputs; s.from == "node"}
 }
 
 problems contains sprintf("node %v is in a cycle", [n]) if {
@@ -242,11 +270,13 @@ problems contains sprintf("node %v is in a cycle", [n]) if {
 	n in graph.reachable(deps, ds)
 }
 
-leads_to_root := graph.reachable(deps, {policy.root})
+required := {n | some n in required_list}
 
-problems contains sprintf("node %v does not lead to the root", [n]) if {
+leads_to_capability := graph.reachable(deps, required)
+
+problems contains sprintf("node %v does not lead to the capability", [n]) if {
 	some n, _ in nodes
-	not n in leads_to_root
+	not n in leads_to_capability
 }
 
 # ---- trusted issuers: one list for each type the graph may take presented and verify
@@ -262,6 +292,12 @@ registry_types contains type if {
 	takes_presented(raw)
 	spec := interfaces[node.component].inputs[name]
 	not spec.supplied_key
+	type := spec.type
+}
+
+# the credential a parameter is read from is presented, and verified against the registry
+registry_types contains type if {
+	some spec in parameters
 	type := spec.type
 }
 

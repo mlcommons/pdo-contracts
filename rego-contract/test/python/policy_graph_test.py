@@ -18,7 +18,7 @@ format):
          "present": {<role>: [<credential name>, ...]},
          "change":  {<credential name>: <JSON merge patch>},       {} for none
          "expect":  {"decision": true, "subject", "operation", "evidence", "verified"}
-                 or {"decision": false, "missing": [{"node", "input"}]}
+                 or {"decision": false, "missing": [{"node", "input"} or {"parameter"}]}
                  or {"decision": false, "reason": "<why>"}}
       ]
     }
@@ -32,9 +32,9 @@ DIDs and PEMs throughout: subjects, claims, policy data, request, expectations a
 graph's trusted_issuers lists. Each node's policy_data in the graph file is replaced by the
 tests' policy_data. The contract must reach the decision the test expects: an allow must
 issue the expected operation about the expected subject (evidence and verified, which name the
-credentials the decision rested on, are not visible on-chain), a denial for missing inputs must
-name one of the inputs the test expects missing (the contract's error names the first it
-finds), and any other denial's error must contain the expected reason.
+credentials the decision rested on, are not visible on-chain), a denial for a missing input or
+parameter must name one of those the test expects missing (the contract's error names the
+first it finds), and any other denial's error must contain the expected reason.
 """
 
 import base64
@@ -214,6 +214,14 @@ def presentation(graph_test, number):
     return write_json(f"test_{number}_presentation.json", presented)
 
 
+def needs(missing):
+    """How the contract's error starts for an input or a parameter of the capability with
+    nothing to take."""
+    if "parameter" in missing:
+        return f"capability parameter {missing['parameter']} needs a "
+    return f"node {missing['node']} input {missing['input']} needs a "
+
+
 def decided(graph_test, number):
     """Whether the contract reached the decision the test expects, and what it did."""
     presentation_file = presentation(graph_test, number)
@@ -237,7 +245,7 @@ def decided(graph_test, number):
     if error is None:
         return False, "allowed"
     if "missing" in expect:
-        return any(f"node {m['node']} input {m['input']} needs a " in error for m in expect["missing"]), error
+        return any(needs(m) in error for m in expect["missing"]), error
     return expect["reason"] in error, error
 
 

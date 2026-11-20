@@ -1,13 +1,11 @@
 {
   "registry": {
     "membership": ["did:example:members"],
-    "membership_grant": ["did:example:office"],
     "public_key": ["did:example:keys"]
   },
   "request": {"channel_key": "KEY-1"},
   "policy_data": {
-    "member": {"allowedInstitutions": ["Hyperledger", "Intel"]},
-    "download": {}
+    "member": {"allowedInstitutions": ["Hyperledger", "Intel"]}
   },
   "credentials": {
     "membership": {"type": "membership", "issuer": "did:example:members", "signer": "did:example:members",
@@ -15,9 +13,7 @@
     "key": {"type": "public_key", "issuer": "did:example:keys", "signer": "did:example:keys",
             "subject": "did:example:applicant", "claims": {"key": "KEY-1"}},
     "other_key": {"type": "public_key", "issuer": "did:example:keys", "signer": "did:example:keys",
-                  "subject": "did:example:applicant", "claims": {"key": "KEY-2"}},
-    "grant": {"type": "membership_grant", "issuer": "did:example:office", "signer": "did:example:office",
-              "subject": "did:example:applicant", "claims": {}}
+                  "subject": "did:example:applicant", "claims": {"key": "KEY-2"}}
   },
   "tests": [
     {
@@ -32,25 +28,31 @@
       "name": "deny: an institution the owner does not allow",
       "present": {"applicant": ["membership", "key"]},
       "change": {"membership": {"claims": {"institution": "Elsewhere"}}},
-      "expect": {"decision": false, "reason": "the root issued no capability"}
+      "expect": {"decision": false, "reason": "node member produced no credential"}
     },
     {
       "name": "deny: a key other than the requested one",
       "present": {"applicant": ["membership", "other_key"]},
       "change": {},
-      "expect": {"decision": false, "reason": "the root issued no capability"}
+      "expect": {"decision": false, "reason": "no public_key about the subject has the key the request names for channel_key"}
     },
     {
       "name": "deny: the key of someone else",
       "present": {"applicant": ["membership", "key"]},
       "change": {"key": {"subject": "did:example:someone-else"}},
-      "expect": {"decision": false, "reason": "the root issued no capability"}
+      "expect": {"decision": false, "reason": "no public_key about the subject has the key the request names for channel_key"}
     },
     {
       "name": "deny: no key presented",
       "present": {"applicant": ["membership"]},
       "change": {},
-      "expect": {"decision": false, "missing": [{"node": "download", "input": "key"}]}
+      "expect": {"decision": false, "missing": [{"parameter": "channel_key"}]}
+    },
+    {
+      "name": "deny: a key from an issuer the contract does not trust",
+      "present": {"applicant": ["membership", "key"]},
+      "change": {"key": {"issuer": "did:example:elsewhere", "signer": "did:example:elsewhere"}},
+      "expect": {"decision": false, "missing": [{"parameter": "channel_key"}]}
     },
     {
       "name": "deny: a membership from an issuer the contract does not trust",
@@ -63,22 +65,6 @@
       "present": {"applicant": ["membership", "key"]},
       "change": {"membership": {"signer": "did:example:keys"}},
       "expect": {"decision": false, "missing": [{"node": "member", "input": "membership"}]}
-    },
-    {
-      "name": "allow: a presented grant stands in for the membership",
-      "present": {"applicant": ["grant", "key"]},
-      "change": {},
-      "expect": {"decision": true, "subject": "did:example:applicant",
-                 "operation": {"name": "do_download", "parameters": {"channel_key": "KEY-1"}},
-                 "evidence": ["grant", "key"], "verified": ["grant", "key"]}
-    },
-    {
-      "name": "allow: an untrusted grant is passed over for the membership",
-      "present": {"applicant": ["grant", "membership", "key"]},
-      "change": {"grant": {"issuer": "did:example:elsewhere", "signer": "did:example:elsewhere"}},
-      "expect": {"decision": true, "subject": "did:example:applicant",
-                 "operation": {"name": "do_download", "parameters": {"channel_key": "KEY-1"}},
-                 "evidence": ["membership", "key"], "verified": ["membership", "key"]}
     },
     {
       "name": "allow: two keys, the request names one, both are verified",

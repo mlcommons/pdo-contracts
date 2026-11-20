@@ -1,8 +1,9 @@
 # Policy graphs
 
 A `rego_policy_agent`'s policy is a graph of Rego components that pass credentials to each
-other, set once by `set_rego_policy`. The root component issues the capability, and the
-agent signs it as a `policy_decision`. This page is the spec.
+other, set once by `set_rego_policy`. The graph's capability names the operation it issues,
+the nodes that must all hold, and where each parameter of the operation comes from; the
+agent signs the operation as a `policy_decision`. This page is the spec.
 
 ## Terms
 
@@ -12,46 +13,48 @@ agent signs it as a `policy_decision`. This page is the spec.
 | component | a Rego module, `package pf.components.<id>`, with a static `interface` rule and an evaluated `output` rule |
 | node | a component instance in one graph: `{component, inputs, policy_data}` |
 | source | where an input's credentials come from: `presented`, or `node` (the output of another node), which may also `accept_presented` |
-| capability | what the root outputs: `{type: "Capability", subject, claims: {operation: {name, parameters}}}` |
+| capability | the graph's `capability`: the operation it issues, the nodes it `requires`, and for each parameter of the operation the presented credential whose claim it is |
 
 ## The graph
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "name": "Membership download",
-  "root": "download",
   "nodes": {
     "member": {"component": "member",
                "inputs": {"membership": {"from": "presented"}},
-               "policy_data": {"allowedInstitutions": ["Intel"]}},
-    "download": {"component": "download",
-                 "inputs": {"key": {"from": "presented"},
-                            "grant": {"from": "node", "node": "member", "accept_presented": true}},
-                 "policy_data": {}}
+               "policy_data": {"allowedInstitutions": ["Intel"]}}
   },
-  "trusted_issuers": {"membership": [], "membership_grant": [], "public_key": []}
+  "capability": {
+    "operation": "do_download",
+    "requires": ["member"],
+    "parameters": {"channel_key": {"type": "public_key", "role": "applicant", "claim": "key"}}
+  },
+  "trusted_issuers": {"membership": [], "public_key": []}
 }
 ```
 
-- Every input of a node's component is bound, to one source or to a list of sources.
+- Every input of a node's component is bound to one source.
 - A `node` source takes the output of that node, whose output type must be the input's type.
   With `accept_presented: true` it takes every usable presented credential of the type and role
   instead (trusted, and from a listed issuer when the type's list is not empty), when there is
   at least one; the node it names then does not run, unless another input of an active node
   reads it.
-- A list of sources reads at least two distinct nodes, each with `accept_presented: false`.
-  The input takes all their outputs, and is empty unless every one of them produced at least
-  one credential. Several cards on one dataset feed their grants to one root this way.
-- `trusted_issuers` has exactly one key for each type an input takes from the registry -- an
-  input bound to `presented`, or to a node with `accept_presented: true` -- leaving out the
-  types of `supplied_key` inputs: no more keys, no fewer. Each value lists the issuer DIDs the
-  graph accepts for that type; an empty list leaves the choice to the contract's registry
-  (`register_trusted_issuer`).
-- Node ids, component ids, input names, roles and credential types are made of letters, digits
-  and `_`.
-- There is no cycle, every node leads to the root, only the root outputs a `Capability`, no
-  input takes one, and every component sent with the graph is used by a node.
+- `capability` has exactly `operation`, a non-empty name; `requires`, the nodes that must all
+  hold, at least one and each once; and `parameters`, each `{type, role, claim}`: the
+  parameter is the value the request gives under its name, and must be the `claim` of a
+  presented credential of that type and role about the decision's subject. Several cards on
+  one dataset each add their node to `requires`.
+- `trusted_issuers` has exactly one key for each type taken from the registry -- by an input
+  bound to `presented`, or to a node with `accept_presented: true`, and by each parameter --
+  leaving out the types of `supplied_key` inputs: no more keys, no fewer. Each value lists the
+  issuer DIDs the graph accepts for that type; an empty list leaves the choice to the
+  contract's registry (`register_trusted_issuer`).
+- Node ids, component ids, input names, roles, credential types, parameter names and claims
+  are made of letters, digits and `_`.
+- There is no cycle, every node leads to a node the capability requires, no component outputs
+  or takes a `Capability`, and every component sent with the graph is used by a node.
 
 The validator combinator (`src/rego/common/graph_validator.rego`) checks all of this when
 the graph is set.
@@ -87,9 +90,7 @@ output := [grant |
   subject, claims, evidence}`: a non-empty `subject`, and `evidence` drawn from the evidence
   the node was given. A component with a `supplied_key` input also returns, on every
   credential (an empty list when there is nothing to check), `key_checks: [{index, key,
-  key_type}]`: the credentials of those inputs to verify against `key` (`ec` or `rsa`). A
-  capability's claims are exactly `{operation: {name, parameters}}`, with a non-empty name and
-  an object of parameters.
+  key_type}]`: the credentials of those inputs to verify against `key` (`ec` or `rsa`).
 - An output of any other shape is an error, not a denial: the call fails with "node N returned
   an ill-formed output". So a component builds its outputs; it does not pass a presented
   credential through, since that carries an `issuer`.
@@ -103,7 +104,8 @@ output := [grant |
 Requirements are alternatives, each a minimal set of presented credential types by role. A
 presented input needs its own type; a node input needs what its producer needs;
 `accept_presented` adds the alternative of presenting the credential itself; a node needs one
-alternative of each of its inputs. Alternatives that include another are dropped, and a graph
+alternative of each of its inputs, and the capability one of each node it requires and the
+type of each parameter. Alternatives that include another are dropped, and a graph
 whose expansion holds more than 64 at any step is refused, even if fewer remain at the end.
 `get_requirements` returns them, smallest first.
 
@@ -115,19 +117,22 @@ whose expansion holds more than 64 at any step is refused, even if fewer remain 
    role the policy does not read").
 2. Plan (`src/rego/common/graph_planner.rego`). A presented input takes the credentials of its
    type and role that are trusted and, when the graph lists issuers for the type, from one of
-   them; a `supplied_key` input takes every credential of its type and role. The active nodes
-   are those the root reaches over node sources, ordered producers first. A presented input of
-   an active node with nothing to take denies, naming the node, the input, the type and the
-   role.
+   them; a `supplied_key` input takes every credential of its type and role. A parameter is
+   offered the credentials of its type and role a presented input would take. The active nodes
+   are those the required nodes reach over node sources, and themselves, ordered producers
+   first. A presented input of an active node, or a parameter, with nothing to take denies,
+   naming it, the type and the role.
 3. Run each active node in its own engine, and check what it returns.
-4. Allow only if the root returned at least one capability, and all of them carry the same
-   subject and operation.
-5. Verify every presented credential bound to an active node, cited or not: against the
-   registry (its issuer is its signer, that signer is trusted for its type, and it is on the
-   graph's list for the type when the list is not empty), or, for a `supplied_key` input, its
-   issuer is its signer and it verifies against every key the node supplied for it, at least
-   one. Any failure denies.
-6. Sign a `policy_decision` about the capabilities' subject, whose claims are their operation.
+4. Allow only if every node the capability requires produced at least one credential, all of
+   them about one subject, and for each parameter the request gives a value that is the claim
+   of a credential offered to the parameter, about that subject. The operation is the
+   capability's `operation` with those values as its `parameters`.
+5. Verify every presented credential bound to an active node, cited or not, and every one
+   offered to a parameter: against the registry (its issuer is its signer, that signer is
+   trusted for its type, and it is on the graph's list for the type when the list is not
+   empty), or, for a `supplied_key` input, its issuer is its signer and it verifies against
+   every key the node supplied for it, at least one. Any failure denies.
+6. Sign a `policy_decision` about that subject, whose claims are the operation.
 
 ### Denials and errors
 
@@ -136,8 +141,11 @@ A denial fails `issue_policy_credential` with "policy evaluation denied, " and o
 | Reason | When |
 | --- | --- |
 | `node N input I needs a T presented in role R` | step 2: the first missing input |
-| `the root issued no capability` | step 4: the root returned nothing |
-| `the capabilities disagree` | step 4: the root's capabilities differ in subject or operation |
+| `capability parameter P needs a T presented in role R` | step 2: a parameter with nothing to take, when no input is missing |
+| `node N produced no credential` | step 4: a node the capability requires produced nothing |
+| `the nodes the capability requires are about different subjects` | step 4 |
+| `the request names no P` | step 4: the request has no value for parameter P |
+| `no T about the subject has the C the request names for P` | step 4 |
 | `credential verification failed` | step 5 |
 
 These are errors, not denials, and say the policy or the call is wrong: "unexpected error,

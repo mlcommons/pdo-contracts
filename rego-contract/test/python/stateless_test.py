@@ -18,8 +18,8 @@ asset_user = "user3"
 guardian_url = GUARDIAN_URL
 script_dir = os.path.dirname(os.path.abspath(__file__))
 # the policy: a graph whose member component checks a "membership" credential against
-# its node's policy data, and whose download component issues the capability for the
-# key the request names
+# its node's policy data, and whose capability reads the key the request names from the
+# applicant's "public_key" credential
 graph_dir = os.path.join(script_dir, os.path.pardir, "graphs", "download")
 graph_path = os.path.join(graph_dir, "graph.json")
 components_path = os.path.join(graph_dir, "components")
@@ -248,7 +248,7 @@ def user_action():
     with open(presentation_file, "w") as fp:
         json.dump({"applicant": vp}, fp)
 
-    # the graph's download component takes the key the request names
+    # the capability's channel_key is the key the request names
     with open(public_key_credential_path, "r") as fp:
         channel_key = json.load(fp)["credentialSubject"]["claims"]["key"]
 

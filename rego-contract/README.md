@@ -24,8 +24,9 @@ allowed.
 
 ## Policies
 
-Each component reads credentials and outputs credentials, and the root issues the
-capability. A trusted validator checks the graph when it is set, and a trusted planner
+Each component reads credentials and outputs credentials, and the graph's capability
+names the operation, the nodes that must all hold and the credential each of its
+parameters is read from. A trusted validator checks the graph when it is set, and a trusted planner
 decides per request which components run and whether a presented credential stands
 in for a component's output. `get_requirements` lists the bundles of credentials that
 satisfy the policy. [docs/policy_graph.md](docs/policy_graph.md) is the spec, with the

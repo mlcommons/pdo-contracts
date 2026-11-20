@@ -22,8 +22,9 @@
 #include "Value.h"
 
 // Graph mode of the rego_policy_agent: the policy is a graph of Rego components that
-// pass credentials to each other, and its root issues the capability (see
-// docs/policy_graph.md). These helpers validate a graph, expand its requirement
+// pass credentials to each other, and its capability names the operation it issues, the
+// nodes that must all hold, and the presented credential each parameter of the operation
+// is read from (see docs/policy_graph.md). These helpers validate a graph, expand its requirement
 // alternatives, plan a request and run the planned components. The methods that store
 // and evaluate a graph are in methods/rego_policy_agent.cpp.
 
@@ -58,8 +59,8 @@ namespace policy_graph
         ww::value::Array& alternatives,
         std::string& error_msg);
 
-    // Run the planner combinator: { order, bindings, missing } for the presented
-    // credential views, { role: [ view, ... ] }.
+    // Run the planner combinator: { order, bindings, parameters, missing } for the
+    // presented credential views, { role: [ view, ... ] }.
     bool plan_graph(
         const ww::value::Object& graph,
         const ww::value::Object& interfaces,
@@ -81,11 +82,16 @@ namespace policy_graph
         ww::value::Object& outputs,
         std::string& error_msg);
 
-    // The root's verdict: allowed when it issued at least one capability and all of them
-    // carry the same subject and operation; otherwise reason says why not.
+    // The capability's verdict: allowed when every node it requires produced a credential,
+    // all of them about one subject, and each of its parameters, as the request names it,
+    // is the claim of a credential the plan offers it about that subject; the operation
+    // is then { name, parameters }. Otherwise reason says why not.
     bool decide(
         const ww::value::Object& graph,
+        const ww::value::Object& plan,
         const ww::value::Object& outputs,
+        const std::vector<ww::value::Object>& views,
+        const ww::value::Object& request,
         bool& allowed,
         std::string& subject,
         ww::value::Object& operation,

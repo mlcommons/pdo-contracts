@@ -54,23 +54,6 @@ static std::vector<std::string> keys_of(const JSON_Object *object)
     return keys;
 }
 
-// the sources of an input: one source object, or a list of them
-static std::vector<const JSON_Object *> sources_of(const JSON_Value *raw)
-{
-    std::vector<const JSON_Object *> sources;
-    if (json_value_get_type(raw) == JSONArray)
-    {
-        const JSON_Array *list = json_value_get_array(raw);
-        for (size_t i = 0; i < json_array_get_count(list); i++)
-            sources.push_back(json_array_get_object(list, i));
-    }
-    else
-    {
-        sources.push_back(json_value_get_object(raw));
-    }
-    return sources;
-}
-
 // names a component id may use: they become keys and package names
 static bool valid_name(const char *name)
 {
@@ -210,8 +193,9 @@ bool ww::rego::policy_graph::validate_graph(
 // compute_alternatives
 //   A bundle is a set of (role, credential type). A presented input needs its own
 //   type; a node input needs what its producer needs; accept_presented offers both.
-//   A node needs one bundle from each of its inputs. Bundles that include another are
-//   dropped, and more than 64 alternatives anywhere is refused.
+//   A node needs one bundle from each of its inputs, and the capability one from each
+//   node it requires and the type of each of its parameters. Bundles that include
+//   another are dropped, and more than 64 alternatives anywhere is refused.
 // -----------------------------------------------------------------
 typedef std::set<std::pair<std::string, std::string>> Bundle;
 typedef std::vector<Bundle> Bundles;
@@ -286,29 +270,24 @@ static bool node_alternatives(
     {
         const JSON_Object *spec = json_object_get_object(specs, name.c_str());
         const Bundle own = {{json_object_get_string(spec, "role"), json_object_get_string(spec, "type")}};
+        const JSON_Object *source = json_object_get_object(inputs, name.c_str());
 
-        Bundles input_alts = {Bundle()};
-        for (const JSON_Object *source : sources_of(json_object_get_value(inputs, name.c_str())))
+        Bundles options;
+        if (strcmp(json_object_get_string(source, "from"), "presented") == 0)
         {
-            Bundles options;
-            if (strcmp(json_object_get_string(source, "from"), "presented") == 0)
-            {
-                options = {own};
-            }
-            else
-            {
-                if (!node_alternatives(nodes, interfaces, json_object_get_string(source, "node"), memo, options, error_msg))
-                    return false;
-                if (json_object_get_boolean(source, "accept_presented") == 1)
-                {
-                    options.push_back(own);
-                    options = minimal(options);
-                }
-            }
-            if (!product(input_alts, options, input_alts, error_msg))
-                return false;
+            options = {own};
         }
-        if (!product(alts, input_alts, alts, error_msg))
+        else
+        {
+            if (!node_alternatives(nodes, interfaces, json_object_get_string(source, "node"), memo, options, error_msg))
+                return false;
+            if (json_object_get_boolean(source, "accept_presented") == 1)
+            {
+                options.push_back(own);
+                options = minimal(options);
+            }
+        }
+        if (!product(alts, options, alts, error_msg))
             return false;
     }
 
@@ -323,11 +302,27 @@ bool ww::rego::policy_graph::compute_alternatives(
     ww::value::Array &alternatives,
     std::string &error_msg)
 {
+    const JSON_Object *nodes = json_object_get_object(as_object(graph), "nodes");
+    const JSON_Object *capability = json_object_get_object(as_object(graph), "capability");
+    const JSON_Array *required_nodes = json_object_get_array(capability, "requires");
+    const JSON_Object *parameters = json_object_get_object(capability, "parameters");
+
     std::map<std::string, Bundles> memo;
-    Bundles bundles;
-    if (!node_alternatives(json_object_get_object(as_object(graph), "nodes"), as_object(interfaces),
-                           json_object_get_string(as_object(graph), "root"), memo, bundles, error_msg))
-        return false;
+    Bundles bundles = {Bundle()};
+    for (size_t r = 0; r < json_array_get_count(required_nodes); r++)
+    {
+        Bundles required;
+        if (!node_alternatives(nodes, as_object(interfaces), json_array_get_string(required_nodes, r), memo, required, error_msg) ||
+            !product(bundles, required, bundles, error_msg))
+            return false;
+    }
+    for (size_t p = 0; p < json_object_get_count(parameters); p++)
+    {
+        const JSON_Object *spec = json_object_get_object(parameters, json_object_get_name(parameters, p));
+        const Bundle own = {{json_object_get_string(spec, "role"), json_object_get_string(spec, "type")}};
+        if (!product(bundles, {own}, bundles, error_msg))
+            return false;
+    }
 
     // smallest first; minimal() keeps bundles of one size in their own order
     Bundles ordered;
@@ -430,9 +425,8 @@ static bool nonempty_string(const JSON_Object *object, const char *key)
 }
 
 // A component's output credential: of the component's output type, about a subject,
-// with claims (a capability's being { operation: { name, parameters } }), resting only
-// on evidence the node was given; with a key check for each credential it checked
-// against a key it supplies.
+// with claims, resting only on evidence the node was given; with a key check for each
+// credential it checked against a key it supplies.
 static bool well_formed(
     const JSON_Value *value,
     const JSON_Object *iface,
@@ -453,16 +447,8 @@ static bool well_formed(
     if (!nonempty_string(credential, "subject"))
         return false;
 
-    const JSON_Object *claims = json_object_get_object(credential, "claims");
-    if (claims == nullptr)
+    if (json_object_get_object(credential, "claims") == nullptr)
         return false;
-    if (strcmp(type, "Capability") == 0)
-    {
-        const JSON_Object *operation = json_object_get_object(claims, "operation");
-        if (!exactly_keys(claims, {"operation"}) || !exactly_keys(operation, {"name", "parameters"}) ||
-            !nonempty_string(operation, "name") || json_object_get_object(operation, "parameters") == nullptr)
-            return false;
-    }
 
     const JSON_Array *evidence = json_object_get_array(credential, "evidence");
     if (evidence == nullptr)
@@ -513,53 +499,41 @@ static bool node_inputs(
     {
         const bool supplied_key =
             json_object_get_boolean(json_object_get_object(specs, name.c_str()), "supplied_key") == 1;
-        const JSON_Array *entries = json_object_get_array(node_bindings, name.c_str());
+        const JSON_Object *entry = json_object_get_object(node_bindings, name.c_str());
 
         JSON_Value *input_value = json_value_init_array();
         JSON_Array *input = json_value_get_array(input_value);
-        bool every_source_yields = true;
-        for (size_t e = 0; e < json_array_get_count(entries); e++)
+        if (strcmp(json_object_get_string(entry, "from"), "presented") == 0)
         {
-            const JSON_Object *entry = json_array_get_object(entries, e);
-            size_t yielded = 0;
-            if (strcmp(json_object_get_string(entry, "from"), "presented") == 0)
+            const JSON_Array *indices = json_object_get_array(entry, "indices");
+            for (size_t k = 0; k < json_array_get_count(indices); k++)
             {
-                const JSON_Array *indices = json_object_get_array(entry, "indices");
-                for (size_t k = 0; k < json_array_get_count(indices); k++)
+                const int index = (int)json_array_get_number(indices, k);
+                if (index < 0 || (size_t)index >= views.size())
                 {
-                    const int index = (int)json_array_get_number(indices, k);
-                    if (index < 0 || (size_t)index >= views.size())
-                    {
-                        json_value_free(input_value);
-                        error_msg.assign("unexpected error, the plan names an unknown credential");
-                        return false;
-                    }
-                    json_array_append_value(input, as_credential(views[index]));
-                    allowed.insert(index);
-                    if (supplied_key)
-                        key_bound.insert(index);
-                    yielded++;
+                    json_value_free(input_value);
+                    error_msg.assign("unexpected error, the plan names an unknown credential");
+                    return false;
                 }
+                json_array_append_value(input, as_credential(views[index]));
+                allowed.insert(index);
+                if (supplied_key)
+                    key_bound.insert(index);
             }
-            else
+        }
+        else
+        {
+            const JSON_Array *creds = json_object_get_array(produced, json_object_get_string(entry, "node"));
+            for (size_t k = 0; k < json_array_get_count(creds); k++)
             {
-                const JSON_Array *creds = json_object_get_array(produced, json_object_get_string(entry, "node"));
-                for (size_t k = 0; k < json_array_get_count(creds); k++)
-                {
-                    const JSON_Value *cred = json_array_get_value(creds, k);
-                    const JSON_Array *evidence = json_object_get_array(json_value_get_object(cred), "evidence");
-                    for (size_t x = 0; x < json_array_get_count(evidence); x++)
-                        allowed.insert((int)json_array_get_number(evidence, x));
-                    json_array_append_value(input, json_value_deep_copy(cred));
-                    yielded++;
-                }
+                const JSON_Value *cred = json_array_get_value(creds, k);
+                const JSON_Array *evidence = json_object_get_array(json_value_get_object(cred), "evidence");
+                for (size_t x = 0; x < json_array_get_count(evidence); x++)
+                    allowed.insert((int)json_array_get_number(evidence, x));
+                json_array_append_value(input, json_value_deep_copy(cred));
             }
-            every_source_yields = every_source_yields && yielded > 0;
         }
 
-        // an input with several sources takes them all, or nothing unless each yields one
-        if (!every_source_yields)
-            json_array_clear(input);
         if (json_array_get_count(input) > REGO_GRAPH_MAX_CREDENTIALS)
         {
             json_value_free(input_value);
@@ -691,57 +665,101 @@ bool ww::rego::policy_graph::run_graph(
 // -----------------------------------------------------------------
 bool ww::rego::policy_graph::decide(
     const ww::value::Object &graph,
+    const ww::value::Object &plan,
     const ww::value::Object &outputs,
+    const std::vector<ww::value::Object> &views,
+    const ww::value::Object &request,
     bool &allowed,
     std::string &subject,
     ww::value::Object &operation,
     std::string &reason,
     std::string &error_msg)
 {
-    const JSON_Array *capabilities =
-        json_object_get_array(as_object(outputs), json_object_get_string(as_object(graph), "root"));
+    const JSON_Object *capability = json_object_get_object(as_object(graph), "capability");
+    const JSON_Array *required_nodes = json_object_get_array(capability, "requires");
     allowed = false;
-    if (json_array_get_count(capabilities) == 0)
-    {
-        reason.assign("the root issued no capability");
-        return true;
-    }
 
-    std::string first;
-    for (size_t k = 0; k < json_array_get_count(capabilities); k++)
+    // every node the capability requires produced a credential, all of them about one subject
+    std::string about;
+    for (size_t r = 0; r < json_array_get_count(required_nodes); r++)
     {
-        const JSON_Object *capability = json_array_get_object(capabilities, k);
-        JSON_Value *verdict = json_value_init_object();
-        json_object_set_string(json_value_get_object(verdict), "subject", json_object_get_string(capability, "subject"));
-        json_object_set_value(json_value_get_object(verdict), "operation",
-                              json_value_deep_copy(json_object_dotget_value(capability, "claims.operation")));
-        char *serialized = json_serialize_to_string(verdict);
-        json_value_free(verdict);
-        if (serialized == nullptr)
+        const char *node_id = json_array_get_string(required_nodes, r);
+        const JSON_Array *creds = json_object_get_array(as_object(outputs), node_id);
+        if (json_array_get_count(creds) == 0)
         {
-            error_msg.assign("unexpected error, failed to serialize a capability");
-            return false;
-        }
-        const std::string this_one(serialized);
-        json_free_serialized_string(serialized);
-        if (k == 0)
-        {
-            first = this_one;
-        }
-        else if (this_one != first)
-        {
-            reason.assign("the capabilities disagree");
+            reason.assign(std::string("node ") + node_id + " produced no credential");
             return true;
         }
+        for (size_t k = 0; k < json_array_get_count(creds); k++)
+        {
+            const std::string this_one(json_object_get_string(json_array_get_object(creds, k), "subject"));
+            if (about.empty())
+            {
+                about = this_one;
+            }
+            else if (this_one != about)
+            {
+                reason.assign("the nodes the capability requires are about different subjects");
+                return true;
+            }
+        }
     }
 
-    const JSON_Object *capability = json_array_get_object(capabilities, 0);
-    subject.assign(json_object_get_string(capability, "subject"));
-    if (operation.set(json_object_dotget_value(capability, "claims.operation")) == nullptr)
+    // each parameter is what the request names, the claim of a presented credential about
+    // that subject
+    const JSON_Object *specs = json_object_get_object(capability, "parameters");
+    const JSON_Object *candidates = json_object_get_object(as_object(plan), "parameters");
+    JSON_Value *parameters_value = json_value_init_object();
+    for (size_t p = 0; p < json_object_get_count(specs); p++)
     {
-        error_msg.assign("unexpected error, failed to read the operation");
+        const char *name = json_object_get_name(specs, p);
+        const JSON_Object *spec = json_object_get_object(specs, name);
+        const char *claim = json_object_get_string(spec, "claim");
+        const JSON_Value *requested = json_object_get_value(as_object(request), name);
+        if (requested == nullptr)
+        {
+            json_value_free(parameters_value);
+            reason.assign(std::string("the request names no ") + name);
+            return true;
+        }
+
+        bool found = false;
+        const JSON_Array *indices = json_object_get_array(candidates, name);
+        for (size_t k = 0; !found && k < json_array_get_count(indices); k++)
+        {
+            int index;
+            if (!integral_index(json_array_get_value(indices, k), index) || (size_t)index >= views.size())
+            {
+                json_value_free(parameters_value);
+                error_msg.assign("unexpected error, the plan names an unknown credential");
+                return false;
+            }
+            const JSON_Object *view = as_object(views[index]);
+            const JSON_Value *value = json_object_get_value(json_object_get_object(view, "claims"), claim);
+            found = about == json_object_get_string(view, "subject") && value != nullptr &&
+                json_value_equals(value, requested) == 1;
+        }
+        if (!found)
+        {
+            json_value_free(parameters_value);
+            reason.assign(std::string("no ") + json_object_get_string(spec, "type") + " about the subject has the " +
+                          claim + " the request names for " + name);
+            return true;
+        }
+        json_object_set_value(json_value_get_object(parameters_value), name, json_value_deep_copy(requested));
+    }
+
+    JSON_Value *operation_value = json_value_init_object();
+    json_object_set_string(json_value_get_object(operation_value), "name", json_object_get_string(capability, "operation"));
+    json_object_set_value(json_value_get_object(operation_value), "parameters", parameters_value);
+    const bool kept = operation.set(operation_value) != nullptr;
+    json_value_free(operation_value);
+    if (!kept)
+    {
+        error_msg.assign("unexpected error, failed to build the operation");
         return false;
     }
+    subject = about;
     allowed = true;
     return true;
 }

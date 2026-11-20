@@ -235,7 +235,7 @@ static bool load_task_credential(
 
 // -----------------------------------------------------------------
 // Build and sign a credential of the given type, about subject, with claims: the
-// policy_decision the root's capabilities describe. It is signed with the policy
+// policy_decision the graph's capability describes. It is signed with the policy
 // agent's issuer key, exactly as policy_agent issues its own credentials, and
 // names the agent's DID as its issuer.
 // -----------------------------------------------------------------
@@ -301,10 +301,11 @@ static bool load_graph_policy(
 }
 
 // -----------------------------------------------------------------
-// Plan a graph request and, unless a presented input has nothing to take, run the
-// planned nodes. The presentations may leave out a role only some alternatives read,
-// but may not name a role the graph never reads. view_presentations numbers the
-// presented credentials role by role, in order.
+// Plan a graph request and, unless a presented input or a parameter of the capability
+// has nothing to take, run the planned nodes. The presentations may leave out a role
+// only some alternatives read, but may not name a role the graph never reads.
+// view_presentations numbers the presented credentials role by role, in order, and
+// views[i] is the view of the credential with index i.
 // -----------------------------------------------------------------
 static bool evaluate_graph_request(
     const Message &msg,
@@ -312,11 +313,12 @@ static bool evaluate_graph_request(
     ww::value::Object &interfaces,
     ww::value::Object &plan,
     ww::value::Object &outputs,
+    ww::value::Object &request,
+    std::vector<ww::value::Object> &views,
     std::vector<std::string> &vc_json_by_index,
     std::string &error_msg)
 {
     ww::value::Object presentations;
-    ww::value::Object request;
     if (!msg.get_value("presentation", presentations) || !msg.get_value("request", request))
     {
         error_msg.assign("invalid request, missing 'presentation' or 'request'");
@@ -369,7 +371,6 @@ static bool evaluate_graph_request(
         return false;
     }
 
-    std::vector<ww::value::Object> views;
     for (size_t ri = 0; ri < presented_roles.get_count(); ri++)
     {
         ww::value::Array creds;
@@ -399,11 +400,31 @@ static bool evaluate_graph_request(
 }
 
 // -----------------------------------------------------------------
+// Whether a presented credential verifies against the registry for its type and, when
+// the graph lists issuers for the type, is from one of them.
+// -----------------------------------------------------------------
+static bool verify_registered_credential(
+    const JSON_Object *trusted,
+    const char *type,
+    const ww::value::Object &vc_object,
+    ww::identity::VerifiableCredential &vc)
+{
+    if (!ww::identity::policy_agent::verify_credential(vc_object, vc, type))
+        return false;
+    const JSON_Array *listed = json_object_get_array(trusted, type);
+    bool listed_issuer = json_array_get_count(listed) == 0;
+    const std::string issuer = ww::identity::did_of(vc.credential_.issuer_.id_);
+    for (size_t l = 0; !listed_issuer && l < json_array_get_count(listed); l++)
+        listed_issuer = issuer == json_array_get_string(listed, l);
+    return listed_issuer;
+}
+
+// -----------------------------------------------------------------
 // Verify every presented credential the plan bound to an active node, whether a
-// component cited it or not: against the registry and, when the graph lists issuers
-// for its type, it must be from one of them; or, for an input its component checks
-// against a key it supplies, against every key the node supplied for it, of which
-// there must be at least one. Returns false at the first failure.
+// component cited it or not, and every one it offered a parameter of the capability:
+// against the registry; or, for an input its component checks against a key it
+// supplies, against every key the node supplied for it, of which there must be at
+// least one. Returns false at the first failure.
 // -----------------------------------------------------------------
 static bool verify_bound_credentials(
     const ww::value::Object &graph,
@@ -432,56 +453,65 @@ static bool verify_bound_credentials(
             const JSON_Object *spec = json_object_get_object(specs, name);
             const char *type = json_object_get_string(spec, "type");
             const bool supplied_key = json_object_get_boolean(spec, "supplied_key") == 1;
-            const JSON_Array *entries = json_object_get_array(node_bindings, name);
+            const JSON_Array *indices = json_object_get_array(json_object_get_object(node_bindings, name), "indices");
 
-            for (size_t e = 0; e < json_array_get_count(entries); e++)
+            for (size_t k = 0; k < json_array_get_count(indices); k++)
             {
-                const JSON_Array *indices = json_object_get_array(json_array_get_object(entries, e), "indices");
-                for (size_t k = 0; k < json_array_get_count(indices); k++)
+                const double index = json_array_get_number(indices, k);
+                ww::value::Object task;
+                task.set_number("index", index);
+                ww::value::Object vc_object;
+                ww::identity::VerifiableCredential vc;
+                if (!load_task_credential(task, vc_json_by_index, vc_object, vc))
+                    return false;
+
+                if (!supplied_key)
                 {
-                    const double index = json_array_get_number(indices, k);
-                    ww::value::Object task;
-                    task.set_number("index", index);
-                    ww::value::Object vc_object;
-                    ww::identity::VerifiableCredential vc;
-                    if (!load_task_credential(task, vc_json_by_index, vc_object, vc))
+                    if (!verify_registered_credential(trusted, type, vc_object, vc))
                         return false;
-
-                    if (!supplied_key)
-                    {
-                        if (!ww::identity::policy_agent::verify_credential(vc_object, vc, type))
-                            return false;
-                        const JSON_Array *listed = json_object_get_array(trusted, type);
-                        bool listed_issuer = json_array_get_count(listed) == 0;
-                        const std::string issuer = ww::identity::did_of(vc.credential_.issuer_.id_);
-                        for (size_t l = 0; !listed_issuer && l < json_array_get_count(listed); l++)
-                            listed_issuer = issuer == json_array_get_string(listed, l);
-                        if (!listed_issuer)
-                            return false;
-                        continue;
-                    }
-
-                    if (ww::identity::contract_id_of(vc.credential_.issuer_.id_) != vc.proof_.verificationMethod_.id_)
-                        return false;
-                    size_t checked = 0;
-                    for (size_t c = 0; c < json_array_get_count(node_outputs); c++)
-                    {
-                        const JSON_Array *checks = json_object_get_array(json_array_get_object(node_outputs, c), "key_checks");
-                        for (size_t x = 0; x < json_array_get_count(checks); x++)
-                        {
-                            const JSON_Object *check = json_array_get_object(checks, x);
-                            if (json_object_get_number(check, "index") != index)
-                                continue;
-                            if (!verify_with_supplied_key(vc, json_object_get_string(check, "key"),
-                                                          json_object_get_string(check, "key_type")))
-                                return false;
-                            checked++;
-                        }
-                    }
-                    if (checked == 0)
-                        return false;
+                    continue;
                 }
+
+                if (ww::identity::contract_id_of(vc.credential_.issuer_.id_) != vc.proof_.verificationMethod_.id_)
+                    return false;
+                size_t checked = 0;
+                for (size_t c = 0; c < json_array_get_count(node_outputs); c++)
+                {
+                    const JSON_Array *checks = json_object_get_array(json_array_get_object(node_outputs, c), "key_checks");
+                    for (size_t x = 0; x < json_array_get_count(checks); x++)
+                    {
+                        const JSON_Object *check = json_array_get_object(checks, x);
+                        if (json_object_get_number(check, "index") != index)
+                            continue;
+                        if (!verify_with_supplied_key(vc, json_object_get_string(check, "key"),
+                                                      json_object_get_string(check, "key_type")))
+                            return false;
+                        checked++;
+                    }
+                }
+                if (checked == 0)
+                    return false;
             }
+        }
+    }
+
+    const JSON_Object *specs =
+        json_object_get_object(json_object_get_object(json_value_get_object(graph.get()), "capability"), "parameters");
+    const JSON_Object *offered = json_object_get_object(json_value_get_object(plan.get()), "parameters");
+    for (size_t p = 0; p < json_object_get_count(offered); p++)
+    {
+        const char *name = json_object_get_name(offered, p);
+        const char *type = json_object_get_string(json_object_get_object(specs, name), "type");
+        const JSON_Array *indices = json_object_get_array(offered, name);
+        for (size_t k = 0; k < json_array_get_count(indices); k++)
+        {
+            ww::value::Object task;
+            task.set_number("index", json_array_get_number(indices, k));
+            ww::value::Object vc_object;
+            ww::identity::VerifiableCredential vc;
+            if (!load_task_credential(task, vc_json_by_index, vc_object, vc) ||
+                !verify_registered_credential(trusted, type, vc_object, vc))
+                return false;
         }
     }
     return true;
@@ -493,10 +523,10 @@ static bool verify_bound_credentials(
 
 // -----------------------------------------------------------------
 // METHOD: issue_policy_credential
-//   Plan the request, run the active nodes, decide from the root's capabilities,
-//   verify every credential the plan bound to an active node, and issue the
-//   policy_decision whose claims are the capabilities' operation, about their
-//   subject (docs/policy_graph.md).
+//   Plan the request, run the active nodes, decide from what the nodes the capability
+//   requires produced, verify every credential the plan bound to an active node or
+//   offered a parameter, and issue the policy_decision whose claims are the
+//   capability's operation, about its subject (docs/policy_graph.md).
 //
 // JSON PARAMETERS:
 //   REGO_POLICY_AGENT_ISSUE_PARAM_SCHEMA
@@ -522,20 +552,27 @@ bool ww::rego::rego_policy_agent::issue_policy_credential(
     ww::value::Object interfaces;
     ww::value::Object plan;
     ww::value::Object outputs;
+    ww::value::Object request;
+    std::vector<ww::value::Object> views;
     std::vector<std::string> vc_json_by_index;
-    ASSERT_SUCCESS(rsp, evaluate_graph_request(msg, graph, interfaces, plan, outputs, vc_json_by_index, error_msg),
+    ASSERT_SUCCESS(rsp, evaluate_graph_request(msg, graph, interfaces, plan, outputs, request, views,
+                                               vc_json_by_index, error_msg),
                    error_msg.c_str());
 
-    // a presented input with nothing to take denies before any component runs
+    // a presented input or a parameter with nothing to take denies before any component runs
     ww::value::Array missing;
     plan.get_value("missing", missing);
     if (missing.get_count() > 0)
     {
         ww::value::Object first;
         missing.get_value(0, first);
-        const std::string reason = std::string("policy evaluation denied, node ") + first.get_string("node") +
-            " input " + first.get_string("input") + " needs a " + first.get_string("type") +
-            " presented in role " + first.get_string("role");
+        const char *parameter = first.get_string("parameter");
+        const std::string needs = std::string(" needs a ") + first.get_string("type") + " presented in role " +
+            first.get_string("role");
+        const std::string reason = parameter != nullptr
+            ? std::string("policy evaluation denied, capability parameter ") + parameter + needs
+            : std::string("policy evaluation denied, node ") + first.get_string("node") + " input " +
+                first.get_string("input") + needs;
         return rsp.error(reason.c_str());
     }
 
@@ -543,7 +580,8 @@ bool ww::rego::rego_policy_agent::issue_policy_credential(
     std::string subject;
     ww::value::Object operation;
     std::string reason;
-    ASSERT_SUCCESS(rsp, ww::rego::policy_graph::decide(graph, outputs, allowed, subject, operation, reason, error_msg),
+    ASSERT_SUCCESS(rsp, ww::rego::policy_graph::decide(graph, plan, outputs, views, request, allowed, subject, operation,
+                                                       reason, error_msg),
                    error_msg.c_str());
     ASSERT_SUCCESS(rsp, allowed, ("policy evaluation denied, " + reason).c_str());
 

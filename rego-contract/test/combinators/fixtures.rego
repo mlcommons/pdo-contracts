@@ -1,4 +1,4 @@
-# Fixtures for the graph combinator tests: an IRB-shaped graph of five components.
+# Fixtures for the graph combinator tests: an IRB-shaped graph of four components.
 
 package fixtures
 
@@ -27,13 +27,8 @@ interfaces := {
 		"policy_data_schema": {},
 	},
 	"ethics_approval_required": {
-		"output": "DownloadGrantCredential",
+		"output": "DataUseConditionCredential",
 		"inputs": {"clearance": user("IRBClearanceCredential"), "use": user("IntendedDataUseCredential")},
-		"policy_data_schema": {},
-	},
-	"grant_download": {
-		"output": "Capability",
-		"inputs": {"key": user("publicKeyCredential"), "grant": user("DownloadGrantCredential")},
 		"policy_data_schema": {},
 	},
 }
@@ -43,9 +38,8 @@ presented := {"from": "presented"}
 from_node(n, accept) := {"from": "node", "node": n, "accept_presented": accept}
 
 graph := {
-	"version": 2,
+	"version": 3,
 	"name": "Ethics Approval Required",
-	"root": "grant_download",
 	"nodes": {
 		"project_membership": {
 			"component": "project_membership",
@@ -71,11 +65,11 @@ graph := {
 			"inputs": {"clearance": from_node("irb_clearance", true), "use": presented},
 			"policy_data": {},
 		},
-		"grant_download": {
-			"component": "grant_download",
-			"inputs": {"key": presented, "grant": from_node("ethics_approval_required", false)},
-			"policy_data": {},
-		},
+	},
+	"capability": {
+		"operation": "do_download",
+		"requires": ["ethics_approval_required"],
+		"parameters": {"channel_key": {"type": "publicKeyCredential", "role": "User", "claim": "key"}},
 	},
 	"trusted_issuers": {
 		"AffiliationCredential": [],

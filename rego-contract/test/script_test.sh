@@ -17,12 +17,13 @@
 # -----------------------------------------------------------------
 # End-to-end CLI test for the rego_policy_agent + rego_token flow.
 #
-# It exercises a policy graph of two components (graphs/download) end to end:
+# It exercises a policy graph of one component (graphs/download) end to end:
 #   - member is an attribute gate: it takes a "membership" credential whose
 #     institution is on the data owner's allow list (the node's policy data),
-#     and outputs a "membership_grant", which may also be presented instead;
-#   - download is the root: it takes the grant and a "public_key" credential
-#     carrying the channel key the request names, and issues the capability.
+#     and outputs a "membership_grant";
+#   - the graph's capability requires member and reads its channel_key from the
+#     "public_key" credential, about the same applicant, carrying the key the
+#     request names.
 # The rego_policy_agent runs them and signs a "policy_decision" credential whose
 # claims are the capability's operation; the rego_token turns that credential into
 # a guardian capability that returns the encrypted data.
@@ -270,12 +271,12 @@ fi
 yell fetch the stored rego policy
 try rego_policy_agent get_rego_policy ${OPTS} --contract identity.rego_download.rego_policy_agent
 
-yell fetch the requirements, expect an alternative of role applicant with membership_grant and public_key
+yell fetch the requirements, expect an alternative of role applicant with membership and public_key
 F_REQUIREMENTS=$(rego_policy_agent get_requirements ${OPTS} \
     --contract identity.rego_download.rego_policy_agent)
 say "requirements: ${F_REQUIREMENTS}"
-if [[ "${F_REQUIREMENTS}" != *"applicant"* || "${F_REQUIREMENTS}" != *"membership_grant"* || "${F_REQUIREMENTS}" != *"public_key"* ]] ; then
-    die "expected an alternative of role applicant with membership_grant and public_key, got: ${F_REQUIREMENTS}"
+if [[ "${F_REQUIREMENTS}" != *"applicant"* || "${F_REQUIREMENTS}" != *"membership"* || "${F_REQUIREMENTS}" != *"public_key"* ]] ; then
+    die "expected an alternative of role applicant with membership and public_key, got: ${F_REQUIREMENTS}"
 fi
 
 
@@ -335,7 +336,7 @@ try id_wallet get_vp ${OPTS} --contract identity.downloader.wallet \
 # wrap the presentation under the required role: { "applicant": <VP> }
 echo "{\"applicant\": $(cat ${TEST_ROOT}/vp.json)}" > ${TEST_ROOT}/presentation.json
 
-# the graph's download component takes the key the request names
+# the capability's channel_key is the key the request names
 F_REQUEST=$(python3 -c 'import json,sys; print(json.dumps({"channel_key": json.load(open(sys.argv[1]))["credentialSubject"]["claims"]["key"]}))' \
     ${TEST_ROOT}/user_channel_key/credential_key.json)
 
